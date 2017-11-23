@@ -399,28 +399,53 @@ void init(void);
 
 #define UNREACHABLE TRAP(UNREACHABLE)
 
-#define CALL_INDIRECT(table, t, ft, x, ...)                                 \
-  (((x) < table.len && table.data[x].func && table.data[x].func_type == ft) \
-       ? ((t)table.data[x].func)(__VA_ARGS__)                               \
+#define CALL_INDIRECT(table, t, ft, x, ...)        \
+  (LIKELY((x) < table.len && table.data[x].func && \
+          table.data[x].func_type == ft)           \
+       ? ((t)table.data[x].func)(__VA_ARGS__)      \
        : TRAP(CALL_INDIRECT))
 
 #define MEMCHECK(mem, a, t)  \
-  if (UNLIKELY((a) + sizeof(t) > mem.len)) TRAP(OOB)
+  if (UNLIKELY((a) + sizeof(t) > mem->len)) TRAP(OOB)
 
-#define DEFINE_LOAD(mem, name, t1, t2, t3)        \
-  static inline t3 name(u32 addr) {               \
-    MEMCHECK(mem, addr, t1);                      \
-    t1 result;                                    \
-    memcpy(&result, &mem.data[addr], sizeof(t1)); \
-    return (t3)(t2)result;                        \
-  }
-
-#define DEFINE_STORE(mem, name, t1, t2)            \
-  static inline void name(u32 addr, t2 value) {    \
+#define DEFINE_LOAD(name, t1, t2, t3)              \
+  static inline t3 name(Memory* mem, u32 addr) {   \
     MEMCHECK(mem, addr, t1);                       \
-    t1 wrapped = (t1)value;                        \
-    memcpy(&mem.data[addr], &wrapped, sizeof(t1)); \
+    t1 result;                                     \
+    memcpy(&result, &mem->data[addr], sizeof(t1)); \
+    return (t3)(t2)result;                         \
   }
+
+#define DEFINE_STORE(name, t1, t2)                           \
+  static inline void name(Memory* mem, u32 addr, t2 value) { \
+    MEMCHECK(mem, addr, t1);                                 \
+    t1 wrapped = (t1)value;                                  \
+    memcpy(&mem->data[addr], &wrapped, sizeof(t1));          \
+  }
+
+DEFINE_LOAD(i32_load, u32, u32, u32);
+DEFINE_LOAD(i64_load, u64, u64, u64);
+DEFINE_LOAD(f32_load, f32, f32, f32);
+DEFINE_LOAD(f64_load, f64, f64, f64);
+DEFINE_LOAD(i32_load8_s, s8, s32, u32);
+DEFINE_LOAD(i64_load8_s, s8, s64, u64);
+DEFINE_LOAD(i32_load8_u, u8, u32, u32);
+DEFINE_LOAD(i64_load8_u, u8, u64, u64);
+DEFINE_LOAD(i32_load16_s, s16, s32, u32);
+DEFINE_LOAD(i64_load16_s, s16, s64, u64);
+DEFINE_LOAD(i32_load16_u, u16, u32, u32);
+DEFINE_LOAD(i64_load16_u, u16, u64, u64);
+DEFINE_LOAD(i64_load32_s, s32, s64, u64);
+DEFINE_LOAD(i64_load32_u, u32, u64, u64);
+DEFINE_STORE(i32_store, u32, u32);
+DEFINE_STORE(i64_store, u64, u64);
+DEFINE_STORE(f32_store, f32, f32);
+DEFINE_STORE(f64_store, f64, f64);
+DEFINE_STORE(i32_store8, u8, u32);
+DEFINE_STORE(i32_store16, u16, u32);
+DEFINE_STORE(i64_store8, u8, u64);
+DEFINE_STORE(i64_store16, u16, u64);
+DEFINE_STORE(i64_store32, u32, u64);
 
 #define I32_CLZ(x) ((x) ? __builtin_clz(x) : 32)
 #define I64_CLZ(x) ((x) ? __builtin_clzll(x) : 64)
@@ -1041,39 +1066,7 @@ void CWriter::WriteMemories() {
 
 void CWriter::WriteMemory(const Memory& memory, const std::string& name) {
   Write("Memory ", name, ";", Newline(), Newline(true), Newline(true));
-  WriteDefineLoad(name, "i32_load, u32, u32, u32");
-  WriteDefineLoad(name, "i64_load, u64, u64, u64");
-  WriteDefineLoad(name, "f32_load, f32, f32, f32");
-  WriteDefineLoad(name, "f64_load, f64, f64, f64");
-  WriteDefineLoad(name, "i32_load8_s, s8, s32, u32");
-  WriteDefineLoad(name, "i64_load8_s, s8, s64, u64");
-  WriteDefineLoad(name, "i32_load8_u, u8, u32, u32");
-  WriteDefineLoad(name, "i64_load8_u, u8, u64, u64");
-  WriteDefineLoad(name, "i32_load16_s, s16, s32, u32");
-  WriteDefineLoad(name, "i64_load16_s, s16, s64, u64");
-  WriteDefineLoad(name, "i32_load16_u, u16, u32, u32");
-  WriteDefineLoad(name, "i64_load16_u, u16, u64, u64");
-  WriteDefineLoad(name, "i64_load32_s, s32, s64, u64");
-  WriteDefineLoad(name, "i64_load32_u, u32, u64, u64");
-
-  WriteDefineStore(name, "i32_store, u32, u32");
-  WriteDefineStore(name, "i64_store, u64, u64");
-  WriteDefineStore(name, "f32_store, f32, f32");
-  WriteDefineStore(name, "f64_store, f64, f64");
-  WriteDefineStore(name, "i32_store8, u8, u32");
-  WriteDefineStore(name, "i32_store16, u16, u32");
-  WriteDefineStore(name, "i64_store8, u8, u64");
-  WriteDefineStore(name, "i64_store16, u16, u64");
-  WriteDefineStore(name, "i64_store32, u32, u64");
   Write(Newline(true), Newline(true));
-}
-
-void CWriter::WriteDefineLoad(string_view name, string_view rest) {
-  Write("DEFINE_LOAD(", name, ", ", rest, ")", Newline());
-}
-
-void CWriter::WriteDefineStore(string_view name, string_view rest) {
-  Write("DEFINE_STORE(", name, ", ", rest, ")", Newline());
 }
 
 void CWriter::WriteTables() {
@@ -1514,7 +1507,7 @@ void CWriter::Write(const ExprList& exprs) {
           Write(" else ", OpenBrace(), if_.false_, CloseBrace());
         }
         ResetTypeStack(mark);
-        Write(LabelDecl(label));
+        Write(Newline(), LabelDecl(label));
         PopLabel();
         PushTypes(if_.true_.sig);
         break;
@@ -1990,8 +1983,12 @@ void CWriter::Write(const LoadExpr& expr) {
       WABT_UNREACHABLE;
   }
 
+  assert(module_->memories.size() == 1);
+  Memory* memory = module_->memories[0];
+
   Type result_type = expr.opcode.GetResultType();
-  Write(StackVar(0, result_type), " = ", func, "(", StackVar(0));
+  Write(StackVar(0, result_type), " = ", func, "(&", GlobalName(memory->name),
+        ", ", StackVar(0));
   if (expr.offset != 0)
     Write(" + ", expr.offset);
   Write(");", Newline());
@@ -2016,7 +2013,10 @@ void CWriter::Write(const StoreExpr& expr) {
       WABT_UNREACHABLE;
   }
 
-  Write(func, "(", StackVar(1));
+  assert(module_->memories.size() == 1);
+  Memory* memory = module_->memories[0];
+
+  Write(func, "(&", GlobalName(memory->name), ", ", StackVar(1));
   if (expr.offset != 0)
     Write(" + ", expr.offset);
   Write(", ", StackVar(0), ");", Newline());
