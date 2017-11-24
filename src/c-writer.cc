@@ -135,8 +135,14 @@ int GetShiftMask(Type type) {
 
 class CWriter {
  public:
-  CWriter(Stream* stream, const WriteCOptions* options)
-      : options_(options), stream_(stream), module_stream_(stream) {}
+  CWriter(Stream* c_stream,
+          Stream* h_stream,
+          const char* header_name,
+          const WriteCOptions* options)
+      : options_(options),
+        c_stream_(c_stream),
+        h_stream_(h_stream),
+        header_name_(header_name) {}
 
   Result WriteModule(const Module&);
 
@@ -145,6 +151,9 @@ class CWriter {
   typedef std::map<std::string, std::string> SymbolMap;
   typedef std::pair<Index, Type> StackTypePair;
   typedef std::map<StackTypePair, std::string> StackVarSymbolMap;
+
+  void WriteCHeader();
+  void WriteCSource();
 
   size_t MarkTypeStack() const;
   void ResetTypeStack(size_t mark);
@@ -184,6 +193,8 @@ class CWriter {
     Write(std::forward<Args>(args)...);
   }
 
+  std::string GetGlobalName(const std::string&) const;
+
   void Write() {}
   void Write(Newline);
   void Write(OpenBrace);
@@ -205,7 +216,8 @@ class CWriter {
   void Write(const Const&);
   void WriteInitExpr(const ExprList&);
   void InitGlobalSymbols();
-  void WriteHeader();
+  std::string GenerateHeaderGuard() const;
+  void WriteSourceTop();
   void WriteFuncTypes();
   void WriteImports();
   void WriteFuncDeclarations();
@@ -221,6 +233,7 @@ class CWriter {
   void WriteDataInitializers();
   void WriteElemInitializers();
   void WriteInit();
+  void WriteHeaderExports();
   void WriteExports();
   void WriteFuncs();
   void Write(const Func&);
@@ -251,8 +264,10 @@ class CWriter {
   const Module* module_ = nullptr;
   const Func* func_ = nullptr;
   Stream* stream_ = nullptr;
-  Stream* module_stream_ = nullptr;
   MemoryStream func_stream_;
+  Stream* c_stream_ = nullptr;
+  Stream* h_stream_ = nullptr;
+  std::string header_name_;
   Result result_ = Result::Ok;
   int indent_ = 0;
   NextChar next_char_ = NextChar::None;
@@ -333,17 +348,18 @@ static const char* s_global_symbols[] = {
   "strtok", "strxfrm",
 
   // defined
-  "Anyfunc", "CALL_INDIRECT", "DEFINE_LOAD", "DEFINE_REINTERPRET",
-  "DEFINE_STORE", "DIVREM_S", "DIVREM_U", "DIV_U", "Elem", "EXPORT_FUNC",
-  "EXPORT_GLOBAL", "EXPORT_MEMORY", "EXPORT_TABLE", "f32", "F32", "f32_load",
-  "f32_reinterpret_i32", "f32_store", "f64", "F64", "f64_load",
-  "f64_reinterpret_i64", "f64_store", "FMAX", "FMIN", "I32", "I32_CLZ",
-  "I32_CLZ", "I32_DIV_S", "i32_load", "i32_load16_s", "i32_load16_u",
-  "i32_load8_s", "i32_load8_u", "I32_POPCNT", "i32_reinterpret_f32",
-  "I32_REM_S", "I32_ROTL", "I32_ROTR", "i32_store", "i32_store16", "i32_store8",
-  "I32_TRUNC_S_F32", "I32_TRUNC_S_F64", "I32_TRUNC_U_F32", "I32_TRUNC_U_F64",
-  "I64", "I64_CTZ", "I64_CTZ", "I64_DIV_S", "i64_load", "i64_load16_s",
-  "i64_load16_u", "i64_load32_s", "i64_load32_u", "i64_load8_s", "i64_load8_u",
+  "allocate_memory", "allocate_table", "Anyfunc", "CALL_INDIRECT",
+  "DEFINE_LOAD", "DEFINE_REINTERPRET", "DEFINE_STORE", "DIVREM_S", "DIVREM_U",
+  "DIV_U", "Elem", "EXPORT_FUNC", "EXPORT_GLOBAL", "EXPORT_MEMORY",
+  "EXPORT_TABLE", "f32", "F32", "f32_load", "f32_reinterpret_i32", "f32_store",
+  "f64", "F64", "f64_load", "f64_reinterpret_i64", "f64_store", "FMAX", "FMIN",
+  "I32", "I32_CLZ", "I32_CLZ", "I32_DIV_S", "i32_load", "i32_load16_s",
+  "i32_load16_u", "i32_load8_s", "i32_load8_u", "I32_POPCNT",
+  "i32_reinterpret_f32", "I32_REM_S", "I32_ROTL", "I32_ROTR", "i32_store",
+  "i32_store16", "i32_store8", "I32_TRUNC_S_F32", "I32_TRUNC_S_F64",
+  "I32_TRUNC_U_F32", "I32_TRUNC_U_F64", "I64", "I64_CTZ", "I64_CTZ",
+  "I64_DIV_S", "i64_load", "i64_load16_s", "i64_load16_u", "i64_load32_s",
+  "i64_load32_u", "i64_load8_s", "i64_load8_u",
   "I64_POPCNT", "i64_reinterpret_f64", "I64_REM_S", "I64_ROTL", "I64_ROTR",
   "i64_store", "i64_store16", "i64_store32", "i64_store8", "I64_TRUNC_S_F32",
   "I64_TRUNC_S_F64", "I64_TRUNC_U_F32", "I64_TRUNC_U_F64", "init",
@@ -355,12 +371,8 @@ static const char* s_global_symbols[] = {
   "UNLIKELY", "UNREACHABLE",
 };
 
-static const char s_header[] =
-    R"(#include <assert.h>
-#include <math.h>
-#include <stdint.h>
-#include <stdlib.h>
-#include <string.h>
+static const char s_header_top[] =
+    R"(#include <stdint.h>
 
 typedef uint8_t u8;
 typedef int8_t s8;
@@ -384,16 +396,28 @@ typedef struct Table { Elem* data; size_t len; } Table;
 
 extern void trap(Trap) __attribute__((noreturn));
 extern u32 register_func_type(u32 params, u32 results, ...);
+extern void allocate_memory(Memory*, u32 page_size);
+extern void allocate_table(Table*, u32 element_size);
 
-void init(void);
+)";
+
+static const char s_source_includes[] = R"(#include <assert.h>
+#include <math.h>
+#include <stdlib.h>
+#include <string.h>
+
+)";
+
+static const char s_source_declarations[] =
+    R"(void init(void);
 
 #define UNLIKELY(x) __builtin_expect(!!(x), 0)
 #define LIKELY(x) __builtin_expect(!!(x), 1)
 
-#define EXPORT_FUNC(sym, name) void sym(void) __attribute__((alias(#name)))
+#define EXPORT_FUNC(decl, name) decl __attribute__((alias(#name)))
 #define EXPORT_GLOBAL(sym, name) extern int sym __attribute__((alias(#name)))
-#define EXPORT_MEMORY(sym, name) extern int sym __attribute__((alias(#name)))
-#define EXPORT_TABLE(sym, name) extern int sym __attribute__((alias(#name)))
+#define EXPORT_MEMORY(sym, name) extern Memory sym __attribute__((alias(#name)))
+#define EXPORT_TABLE(sym, name) extern Table sym __attribute__((alias(#name)))
 
 #define TRAP(x) (trap(TRAP_##x), 0)
 
@@ -638,8 +662,9 @@ std::string CWriter::DefineName(SymbolSet* set, string_view name) {
 }
 
 string_view StripLeadingDollar(string_view name) {
-  assert(!name.empty() && name[0] == '$');
-  name.remove_prefix(1);
+  if(!name.empty() && name[0] == '$') {
+    name.remove_prefix(1);
+  }
   return name;
 }
 
@@ -756,9 +781,15 @@ void CWriter::Write(const LocalName& name) {
   Write(local_sym_map_[name.name]);
 }
 
+std::string CWriter::GetGlobalName(const std::string& name) const {
+  assert(global_sym_map_.count(name) == 1);
+  auto iter = global_sym_map_.find(name);
+  assert(iter != global_sym_map_.end());
+  return iter->second;
+}
+
 void CWriter::Write(const GlobalName& name) {
-  assert(global_sym_map_.count(name.name) == 1);
-  Write(global_sym_map_[name.name]);
+  Write(GetGlobalName(name.name));
 }
 
 void CWriter::Write(const Var& var) {
@@ -916,8 +947,24 @@ void CWriter::InitGlobalSymbols() {
     global_syms_.insert(symbol);
 }
 
-void CWriter::WriteHeader() {
-  Write(s_header);
+std::string CWriter::GenerateHeaderGuard() const {
+  std::string result;
+  for (char c : header_name_) {
+    if (isalnum(c) || c == '_') {
+      result += toupper(c);
+    } else {
+      result += '_';
+    }
+  }
+  result += "_GENERATED_";
+  return result;
+}
+
+void CWriter::WriteSourceTop() {
+  Write(s_source_includes);
+  Write("#include \"", header_name_, "\"", Newline(), Newline(true),
+        Newline(true));
+  Write(s_source_declarations);
 }
 
 void CWriter::WriteFuncTypes() {
@@ -1057,8 +1104,10 @@ void CWriter::WriteMemories() {
   Index memory_index = 0;
   for (const Memory* memory : module_->memories) {
     bool is_import = memory_index < module_->num_memory_imports;
-    if (!is_import)
+    if (!is_import) {
+      Write("static ");
       WriteMemory(*memory, DefineGlobalName(memory->name));
+    }
     ++memory_index;
   }
   Write(Newline(true), Newline(true));
@@ -1077,8 +1126,10 @@ void CWriter::WriteTables() {
   Index table_index = 0;
   for (const Table* table : module_->tables) {
     bool is_import = table_index < module_->num_table_imports;
-    if (!is_import)
+    if (!is_import) {
+      Write("static ");
       WriteTable(*table, DefineGlobalName(table->name));
+    }
     ++table_index;
   }
   Write(Newline(true), Newline(true));
@@ -1110,6 +1161,10 @@ void CWriter::WriteDataInitializers() {
   }
 
   Write("static void init_memory(void) ", OpenBrace());
+  if (memory) {
+    Write("allocate_memory(&", GlobalName(memory->name), ", ",
+          memory->page_limits.initial, ");", Newline());
+  }
   data_segment_index = 0;
   for (const DataSegment* data_segment : module_->data_segments) {
     Write("memcpy(&", GlobalName(memory->name), ".data[");
@@ -1149,6 +1204,10 @@ void CWriter::WriteElemInitializers() {
   }
 
   Write("static void init_table(void) ", OpenBrace());
+  if (table) {
+    Write("allocate_table(&", GlobalName(table->name), ", ",
+          table->elem_limits.initial, ");", Newline());
+  }
   elem_segment_index = 0;
   for (const ElemSegment* elem_segment : module_->elem_segments) {
     Write("memcpy(&", GlobalName(table->name), ".data[");
@@ -1172,37 +1231,73 @@ void CWriter::WriteInit() {
   Write(CloseBrace(), Newline(), Newline(true), Newline(true));
 }
 
+void CWriter::WriteHeaderExports() {
+  for (const Export* export_ : module_->exports) {
+    std::string mangled_name = MangleName(export_->name);
+
+    switch (export_->kind) {
+      case ExternalKind::Func:
+        WriteFuncDeclaration(module_->GetFunc(export_->var)->decl,
+                             mangled_name);
+        Write(";", Newline());
+        break;
+
+      case ExternalKind::Global:
+        WriteGlobal(*module_->GetGlobal(export_->var), mangled_name);
+        break;
+
+      case ExternalKind::Memory:
+        Write("extern ");
+        WriteMemory(*module_->GetMemory(export_->var), mangled_name);
+        break;
+
+      case ExternalKind::Table:
+        Write("extern ");
+        WriteTable(*module_->GetTable(export_->var), mangled_name);
+        break;
+
+      default: WABT_UNREACHABLE;
+    }
+  }
+  Write(Newline(true), Newline(true));
+}
+
 void CWriter::WriteExports() {
   for (const Export* export_ : module_->exports) {
     const char* macro;
     std::string name;
 
     switch (export_->kind) {
-      case ExternalKind::Func:
-        macro = "EXPORT_FUNC";
-        name = module_->GetFunc(export_->var)->name;
+      case ExternalKind::Func: {
+        const Func* func = module_->GetFunc(export_->var);
+        Write("EXPORT_FUNC(");
+        WriteFuncDeclaration(func->decl, MangleName(export_->name));
+        Write(", ", GlobalName(func->name), ");", Newline());
         break;
+      }
 
       case ExternalKind::Global:
         macro = "EXPORT_GLOBAL";
         name = module_->GetGlobal(export_->var)->name;
-        break;
+        goto common;
 
       case ExternalKind::Memory:
         macro = "EXPORT_MEMORY";
         name = module_->GetMemory(export_->var)->name;
-        break;
+        goto common;
 
       case ExternalKind::Table:
         macro = "EXPORT_TABLE";
         name = module_->GetTable(export_->var)->name;
+        goto common;
+
+      common:
+        Write(macro, "(", MangleName(export_->name), ", ", GlobalName(name),
+              ");", Newline());
         break;
 
       default: WABT_UNREACHABLE;
     }
-
-    Write(macro, "(", MangleName(export_->name), ", ", GlobalName(name), ");",
-          Newline());
   }
   Write(Newline(true), Newline(true));
 }
@@ -1246,7 +1341,7 @@ void CWriter::Write(const Func& func) {
     Write("return ", StackVar(0), ";", Newline());
   }
 
-  stream_ = module_stream_;
+  stream_ = c_stream_;
   WriteStackVarDeclarations();
 
   std::unique_ptr<OutputBuffer> buf = func_stream_.ReleaseOutputBuffer();
@@ -1583,6 +1678,8 @@ void CWriter::Write(const ExprList& exprs) {
         Write("UNREACHABLE;", Newline());
         return;
 
+      case ExprType::AtomicWait:
+      case ExprType::AtomicWake:
       case ExprType::AtomicLoad:
       case ExprType::AtomicRmw:
       case ExprType::AtomicRmwCmpxchg:
@@ -1590,8 +1687,6 @@ void CWriter::Write(const ExprList& exprs) {
       case ExprType::Rethrow:
       case ExprType::Throw:
       case ExprType::TryBlock:
-      case ExprType::Wait:
-      case ExprType::Wake:
         UNIMPLEMENTED("...");
         break;
     }
@@ -2115,16 +2210,29 @@ void CWriter::Write(const UnaryExpr& expr) {
   }
 }
 
-Result CWriter::WriteModule(const Module& module) {
-  WABT_USE(options_);
+void CWriter::WriteCHeader() {
+  stream_ = h_stream_;
+  stream_->ClearOffset();
 
-  // TODO(binji): Write C header as well?
-
-  module_ = &module;
-  InitGlobalSymbols();
-  WriteHeader();
-  WriteFuncTypes();
+  std::string guard = GenerateHeaderGuard();
+  Write("#ifndef ", guard, Newline());
+  Write("#define ", guard, Newline(), Newline(true), Newline(true));
+  Write(s_header_top);
   WriteImports();
+  WriteHeaderExports();
+  Write("#endif  /* ", guard, " */", Newline(), Newline(true), Newline(true));
+}
+
+void CWriter::WriteCSource() {
+  // TODO(binji): this is really ugly.
+  next_char_ = NextChar::None;
+  if (stream_ != c_stream_) {
+    stream_ = c_stream_;
+    stream_->ClearOffset();
+  }
+
+  WriteSourceTop();
+  WriteFuncTypes();
   WriteFuncDeclarations();
   WriteGlobals();
   WriteMemories();
@@ -2134,17 +2242,26 @@ Result CWriter::WriteModule(const Module& module) {
   WriteElemInitializers();
   WriteInit();
   WriteExports();
+}
 
+Result CWriter::WriteModule(const Module& module) {
+  WABT_USE(options_);
+  module_ = &module;
+  InitGlobalSymbols();
+  WriteCHeader();
+  WriteCSource();
   return result_;
 }
 
 
 }  // end anonymous namespace
 
-Result WriteC(Stream* stream,
+Result WriteC(Stream* c_stream,
+              Stream* h_stream,
+              const char* header_name,
               const Module* module,
               const WriteCOptions* options) {
-  CWriter c_writer(stream, options);
+  CWriter c_writer(c_stream, h_stream, header_name, options);
   return c_writer.WriteModule(*module);
 }
 

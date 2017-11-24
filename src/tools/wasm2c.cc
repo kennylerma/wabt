@@ -81,6 +81,16 @@ static void ParseOptions(int argc, char** argv) {
   parser.Parse(argc, argv);
 }
 
+// TODO(binji): copied from binary-writer-spec.cc, probably should share.
+static string_view strip_extension(string_view s) {
+  string_view ext = s.substr(s.find_last_of('.'));
+  string_view result = s;
+
+  if (ext == ".c")
+    result.remove_suffix(ext.length());
+  return result;
+}
+
 int ProgramMain(int argc, char** argv) {
   Result result;
 
@@ -112,9 +122,18 @@ int ProgramMain(int argc, char** argv) {
       }
 
       if (Succeeded(result)) {
-        FileStream stream(!s_outfile.empty() ? FileStream(s_outfile.c_str())
-                                             : FileStream(stdout));
-        result = WriteC(&stream, &module, &s_write_c_options);
+        if (!s_outfile.empty()) {
+          std::string header_name =
+              strip_extension(s_outfile).to_string() + ".h";
+          FileStream c_stream(s_outfile.c_str());
+          FileStream h_stream(header_name);
+          result = WriteC(&c_stream, &h_stream, header_name.c_str(), &module,
+                          &s_write_c_options);
+        } else {
+          FileStream stream(stdout);
+          result =
+              WriteC(&stream, &stream, "wasm.h", &module, &s_write_c_options);
+        }
       }
     }
   }

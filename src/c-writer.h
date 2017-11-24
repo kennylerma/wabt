@@ -26,7 +26,11 @@ class Stream;
 
 struct WriteCOptions {};
 
-Result WriteC(Stream*, const Module*, const WriteCOptions*);
+Result WriteC(Stream* c_stream,
+              Stream* h_stream,
+              const char* header_name,
+              const Module*,
+              const WriteCOptions*);
 
 }  // namespace wabt
 
