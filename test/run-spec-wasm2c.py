@@ -199,8 +199,15 @@ class CWriter(object):
                                        self._Action(command['action'])))
 
   def _WriteAssertActionCommand(self, command):
-    self.out_file.write('%s(() => %s);\n' % (command['type'],
-                                             self._Action(command['action'])))
+    assert_map = {
+      'assert_exhaustion': 'ASSERT_EXHAUSTION',
+      'assert_return': 'ASSERT_RETURN',
+      'assert_trap': 'ASSERT_TRAP',
+    }
+
+    assert_macro = assert_map[command['type']]
+    self.out_file.write('%s(%s);\n' % (
+      assert_macro, self._Action(command['action'])))
 
   def _Module(self, filename):
     with open(os.path.join(self.base_dir, filename), 'rb') as wasm_file:

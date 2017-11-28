@@ -373,6 +373,7 @@ static const char* s_global_symbols[] = {
 
 static const char s_header_top[] =
     R"(#include <stdint.h>
+#include <stdlib.h>
 
 typedef uint8_t u8;
 typedef int8_t s8;
@@ -398,6 +399,7 @@ extern void trap(Trap) __attribute__((noreturn));
 extern u32 register_func_type(u32 params, u32 results, ...);
 extern void allocate_memory(Memory*, u32 page_size);
 extern void allocate_table(Table*, u32 element_size);
+extern void init(void);
 
 )";
 
