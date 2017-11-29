@@ -36,13 +36,6 @@ namespace wabt {
 
 namespace {
 
-enum class NextChar {
-  None,
-  Space,
-  Newline,
-  ForceNewline,
-};
-
 struct Label {
   Label(LabelType label_type,
         const std::string& name,
@@ -117,11 +110,7 @@ struct ResultType {
   const TypeVector& types;
 };
 
-struct Newline {
-  explicit Newline(bool force = false) : force(force) {}
-  bool force = false;
-};
-
+struct Newline {};
 struct OpenBrace {};
 struct CloseBrace {};
 
@@ -151,6 +140,8 @@ class CWriter {
   typedef std::map<std::string, std::string> SymbolMap;
   typedef std::pair<Index, Type> StackTypePair;
   typedef std::map<StackTypePair, std::string> StackVarSymbolMap;
+
+  void UseStream(Stream*);
 
   void WriteCHeader();
   void WriteCSource();
@@ -182,8 +173,7 @@ class CWriter {
   void Indent(int size = INDENT_SIZE);
   void Dedent(int size = INDENT_SIZE);
   void WriteIndent();
-  void WriteNextChar();
-  void WriteDataWithNextChar(const void* src, size_t size);
+  void WriteData(const void* src, size_t size);
   void Writef(const char* format, ...);
 
   template <typename T, typename U, typename... Args>
@@ -270,7 +260,7 @@ class CWriter {
   std::string header_name_;
   Result result_ = Result::Ok;
   int indent_ = 0;
-  NextChar next_char_ = NextChar::None;
+  bool should_write_indent_next_ = false;
 
   SymbolMap global_sym_map_;
   SymbolMap local_sym_map_;
@@ -372,7 +362,8 @@ static const char* s_global_symbols[] = {
 };
 
 static const char s_header_top[] =
-    R"(#include <stdint.h>
+    R"(
+#include <stdint.h>
 #include <stdlib.h>
 
 typedef uint8_t u8;
@@ -400,18 +391,16 @@ extern u32 register_func_type(u32 params, u32 results, ...);
 extern void allocate_memory(Memory*, u32 page_size);
 extern void allocate_table(Table*, u32 element_size);
 extern void init(void);
-
 )";
 
 static const char s_source_includes[] = R"(#include <assert.h>
 #include <math.h>
 #include <stdlib.h>
 #include <string.h>
-
 )";
 
-static const char s_source_declarations[] =
-    R"(void init(void);
+static const char s_source_declarations[] = R"(
+void init(void);
 
 #define UNLIKELY(x) __builtin_expect(!!(x), 0)
 #define LIKELY(x) __builtin_expect(!!(x), 1)
@@ -547,7 +536,6 @@ DEFINE_REINTERPRET(f32_reinterpret_i32, u32, f32)
 DEFINE_REINTERPRET(i32_reinterpret_f32, f32, u32)
 DEFINE_REINTERPRET(f64_reinterpret_i64, u64, f64)
 DEFINE_REINTERPRET(i64_reinterpret_f64, f64, u64)
-
 )";
 
 size_t CWriter::MarkTypeStack() const {
@@ -725,37 +713,22 @@ void CWriter::WriteIndent() {
   }
 }
 
-void CWriter::WriteNextChar() {
-  switch (next_char_) {
-    case NextChar::Space:
-      stream_->WriteChar(' ');
-      break;
-    case NextChar::Newline:
-    case NextChar::ForceNewline:
-      stream_->WriteChar('\n');
-      WriteIndent();
-      break;
-    case NextChar::None:
-      break;
+void CWriter::WriteData(const void* src, size_t size) {
+  if (should_write_indent_next_) {
+    WriteIndent();
+    should_write_indent_next_ = false;
   }
-  next_char_ = NextChar::None;
-}
-
-void CWriter::WriteDataWithNextChar(const void* src, size_t size) {
-  WriteNextChar();
   stream_->WriteData(src, size);
 }
 
 void WABT_PRINTF_FORMAT(2, 3) CWriter::Writef(const char* format, ...) {
   WABT_SNPRINTF_ALLOCA(buffer, length, format);
-  WriteDataWithNextChar(buffer, length);
-  next_char_ = NextChar::None;
+  WriteData(buffer, length);
 }
 
-void CWriter::Write(Newline newline) {
-  if (next_char_ == NextChar::ForceNewline)
-    WriteNextChar();
-  next_char_ = newline.force ? NextChar::ForceNewline : NextChar::Newline;
+void CWriter::Write(Newline) {
+  Write("\n");
+  should_write_indent_next_ = true;
 }
 
 void CWriter::Write(OpenBrace) {
@@ -766,7 +739,7 @@ void CWriter::Write(OpenBrace) {
 
 void CWriter::Write(CloseBrace) {
   Dedent();
-  Write(Newline(), "}");
+  Write("}");
 }
 
 void CWriter::Write(Index index) {
@@ -774,8 +747,7 @@ void CWriter::Write(Index index) {
 }
 
 void CWriter::Write(string_view s) {
-  WriteDataWithNextChar(s.data(), s.size());
-  next_char_ = NextChar::None;
+  WriteData(s.data(), s.size());
 }
 
 void CWriter::Write(const LocalName& name) {
@@ -964,14 +936,14 @@ std::string CWriter::GenerateHeaderGuard() const {
 
 void CWriter::WriteSourceTop() {
   Write(s_source_includes);
-  Write("#include \"", header_name_, "\"", Newline(), Newline(true),
-        Newline(true));
+  Write(Newline(), "#include \"", header_name_, "\"", Newline());
   Write(s_source_declarations);
 }
 
 void CWriter::WriteFuncTypes() {
+  Write(Newline());
   Writef("static u32 func_types[%" PRIzd "];", module_->func_types.size());
-  Write(Newline(), Newline(true));
+  Write(Newline(), Newline());
   Write("static void init_func_types(void) {", Newline());
   Index func_type_index = 0;
   for (FuncType* func_type : module_->func_types) {
@@ -988,10 +960,15 @@ void CWriter::WriteFuncTypes() {
     Write(");", Newline());
     ++func_type_index;
   }
-  Write("}", Newline(), Newline(true), Newline(true));
+  Write("}", Newline());
 }
 
 void CWriter::WriteImports() {
+  if (module_->imports.empty())
+    return;
+
+  Write(Newline());
+
   // TODO(binji): Write imports ordered by type.
   for (const Import* import : module_->imports) {
     Write("extern ");
@@ -1030,12 +1007,13 @@ void CWriter::WriteImports() {
         WABT_UNREACHABLE;
     }
   }
-  Write(Newline(true), Newline(true));
 }
 
 void CWriter::WriteFuncDeclarations() {
   if (module_->funcs.size() == module_->num_func_imports)
     return;
+
+  Write(Newline());
 
   Index func_index = 0;
   for (const Func* func : module_->funcs) {
@@ -1047,7 +1025,6 @@ void CWriter::WriteFuncDeclarations() {
     }
     ++func_index;
   }
-  Write(Newline(true), Newline(true));
 }
 
 void CWriter::WriteFuncDeclaration(const FuncDeclaration& decl,
@@ -1068,6 +1045,8 @@ void CWriter::WriteFuncDeclaration(const FuncDeclaration& decl,
 void CWriter::WriteGlobals() {
   Index global_index = 0;
   if (module_->globals.size() != module_->num_global_imports) {
+    Write(Newline());
+
     for (const Global* global : module_->globals) {
       bool is_import = global_index < module_->num_global_imports;
       if (!is_import) {
@@ -1076,10 +1055,9 @@ void CWriter::WriteGlobals() {
       }
       ++global_index;
     }
-    Write(Newline(true), Newline(true));
   }
 
-  Write("static void init_globals(void) ", OpenBrace());
+  Write(Newline(), "static void init_globals(void) ", OpenBrace());
   global_index = 0;
   for (const Global* global : module_->globals) {
     bool is_import = global_index < module_->num_global_imports;
@@ -1091,7 +1069,7 @@ void CWriter::WriteGlobals() {
     }
     ++global_index;
   }
-  Write(CloseBrace(), Newline(), Newline(true), Newline(true));
+  Write(CloseBrace(), Newline());
 }
 
 void CWriter::WriteGlobal(const Global& global, const std::string& name) {
@@ -1101,6 +1079,8 @@ void CWriter::WriteGlobal(const Global& global, const std::string& name) {
 void CWriter::WriteMemories() {
   if (module_->memories.size() == module_->num_memory_imports)
     return;
+
+  Write(Newline());
 
   assert(module_->memories.size() <= 1);
   Index memory_index = 0;
@@ -1112,17 +1092,17 @@ void CWriter::WriteMemories() {
     }
     ++memory_index;
   }
-  Write(Newline(true), Newline(true));
 }
 
 void CWriter::WriteMemory(const Memory& memory, const std::string& name) {
-  Write("Memory ", name, ";", Newline(), Newline(true), Newline(true));
-  Write(Newline(true), Newline(true));
+  Write("Memory ", name, ";");
 }
 
 void CWriter::WriteTables() {
   if (module_->tables.size() == module_->num_table_imports)
     return;
+
+  Write(Newline());
 
   assert(module_->tables.size() <= 1);
   Index table_index = 0;
@@ -1134,7 +1114,6 @@ void CWriter::WriteTables() {
     }
     ++table_index;
   }
-  Write(Newline(true), Newline(true));
 }
 
 void CWriter::WriteTable(const Table& table, const std::string& name) {
@@ -1146,23 +1125,29 @@ void CWriter::WriteDataInitializers() {
   Index data_segment_index = 0;
 
   if (!module_->memories.empty()) {
-    for (const DataSegment* data_segment : module_->data_segments) {
-      Write("static const u8 data_segment_data_", data_segment_index,
-            "[] = ", OpenBrace());
-      size_t i = 0;
-      for (uint8_t x : data_segment->data) {
-        Writef("0x%02x, ", x);
-        if ((++i % 12) == 0)
+    if (module_->data_segments.empty()) {
+      Write(Newline());
+    } else {
+      for (const DataSegment* data_segment : module_->data_segments) {
+        Write(Newline(), "static const u8 data_segment_data_",
+              data_segment_index, "[] = ", OpenBrace());
+        size_t i = 0;
+        for (uint8_t x : data_segment->data) {
+          if ((++i % 12) == 0)
+            Write(Newline());
+          Writef("0x%02x, ", x);
+        }
+        if (i > 0)
           Write(Newline());
+        Write(CloseBrace(), ";", Newline());
+        ++data_segment_index;
       }
-      Write(CloseBrace(), ";", Newline(), Newline(true), Newline(true));
-      ++data_segment_index;
     }
 
     memory = module_->memories[0];
   }
 
-  Write("static void init_memory(void) ", OpenBrace());
+  Write(Newline(), "static void init_memory(void) ", OpenBrace());
   if (memory) {
     Write("allocate_memory(&", GlobalName(memory->name), ", ",
           memory->page_limits.initial, ");", Newline());
@@ -1175,7 +1160,8 @@ void CWriter::WriteDataInitializers() {
           data_segment->data.size(), ");", Newline());
     ++data_segment_index;
   }
-  Write(CloseBrace(), Newline(), Newline(true), Newline(true));
+
+  Write(CloseBrace(), Newline());
 }
 
 void CWriter::WriteElemInitializers() {
@@ -1184,28 +1170,30 @@ void CWriter::WriteElemInitializers() {
 
   if (!module_->tables.empty()) {
     for (const ElemSegment* elem_segment : module_->elem_segments) {
-      Write("static const Elem elem_segment_data_", elem_segment_index,
-            "[] = ", OpenBrace());
+      Write(Newline(), "static const Elem elem_segment_data_",
+            elem_segment_index, "[] = ", OpenBrace());
 
       size_t i = 0;
       for (const Var& var : elem_segment->vars) {
+        if ((++i % 4) == 0)
+          Write(Newline());
+
         const Func* func = module_->GetFunc(var);
         Index func_type_index = module_->GetFuncTypeIndex(func->decl.type_var);
 
         Write("{", func_type_index, ", (Anyfunc)", GlobalName(func->name),
               "}, ");
-
-        if ((++i % 4) == 0)
-          Write(Newline());
       }
-      Write(CloseBrace(), ";", Newline(), Newline(true), Newline(true));
+      if (i > 0)
+        Write(Newline());
+      Write(CloseBrace(), ";", Newline());
       ++elem_segment_index;
     }
 
     table = module_->tables[0];
   }
 
-  Write("static void init_table(void) ", OpenBrace());
+  Write(Newline(), "static void init_table(void) ", OpenBrace());
   if (table) {
     Write("allocate_table(&", GlobalName(table->name), ", ",
           table->elem_limits.initial, ");", Newline());
@@ -1218,11 +1206,12 @@ void CWriter::WriteElemInitializers() {
           elem_segment->vars.size(), " * sizeof(Elem));", Newline());
     ++elem_segment_index;
   }
-  Write(CloseBrace(), Newline(), Newline(true), Newline(true));
+
+  Write(CloseBrace(), Newline());
 }
 
 void CWriter::WriteInit() {
-  Write("void init(void) ", OpenBrace());
+  Write(Newline(), "void init(void) ", OpenBrace());
   Write("init_func_types();", Newline());
   Write("init_globals();", Newline());
   Write("init_memory();", Newline());
@@ -1230,10 +1219,15 @@ void CWriter::WriteInit() {
   for (Var* var : module_->starts) {
     Write(GlobalName(module_->GetFunc(*var)->name), ";", Newline());
   }
-  Write(CloseBrace(), Newline(), Newline(true), Newline(true));
+  Write(CloseBrace(), Newline());
 }
 
 void CWriter::WriteHeaderExports() {
+  if (module_->exports.empty())
+    return;
+
+  Write(Newline());
+
   for (const Export* export_ : module_->exports) {
     std::string mangled_name = MangleName(export_->name);
 
@@ -1261,10 +1255,14 @@ void CWriter::WriteHeaderExports() {
       default: WABT_UNREACHABLE;
     }
   }
-  Write(Newline(true), Newline(true));
 }
 
 void CWriter::WriteExports() {
+  if (module_->exports.empty())
+    return;
+
+  Write(Newline());
+
   for (const Export* export_ : module_->exports) {
     const char* macro;
     std::string name;
@@ -1301,7 +1299,6 @@ void CWriter::WriteExports() {
       default: WABT_UNREACHABLE;
     }
   }
-  Write(Newline(true), Newline(true));
 }
 
 void CWriter::WriteFuncs() {
@@ -1309,7 +1306,7 @@ void CWriter::WriteFuncs() {
   for (const Func* func : module_->funcs) {
     bool is_import = func_index < module_->num_func_imports;
     if (!is_import)
-      Write(*func);
+      Write(Newline(), *func, Newline());
     ++func_index;
   }
 }
@@ -1344,12 +1341,13 @@ void CWriter::Write(const Func& func) {
   }
 
   stream_ = c_stream_;
+
   WriteStackVarDeclarations();
 
   std::unique_ptr<OutputBuffer> buf = func_stream_.ReleaseOutputBuffer();
   stream_->WriteData(buf->data.data(), buf->data.size());
 
-  Write(CloseBrace(), Newline(true), Newline(true));
+  Write(CloseBrace());
 
   func_stream_.Clear();
   func_ = nullptr;
@@ -1625,7 +1623,6 @@ void CWriter::Write(const ExprList& exprs) {
         PopLabel();
         PushTypes(block.sig);
         Dedent();
-        Write(Newline());
         break;
       }
 
@@ -2214,25 +2211,17 @@ void CWriter::Write(const UnaryExpr& expr) {
 
 void CWriter::WriteCHeader() {
   stream_ = h_stream_;
-  stream_->ClearOffset();
-
   std::string guard = GenerateHeaderGuard();
   Write("#ifndef ", guard, Newline());
-  Write("#define ", guard, Newline(), Newline(true), Newline(true));
+  Write("#define ", guard, Newline());
   Write(s_header_top);
   WriteImports();
   WriteHeaderExports();
-  Write("#endif  /* ", guard, " */", Newline(), Newline(true), Newline(true));
+  Write(Newline(), "#endif  /* ", guard, " */", Newline());
 }
 
 void CWriter::WriteCSource() {
-  // TODO(binji): this is really ugly.
-  next_char_ = NextChar::None;
-  if (stream_ != c_stream_) {
-    stream_ = c_stream_;
-    stream_->ClearOffset();
-  }
-
+  stream_ = c_stream_;
   WriteSourceTop();
   WriteFuncTypes();
   WriteFuncDeclarations();
