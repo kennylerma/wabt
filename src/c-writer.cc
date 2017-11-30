@@ -356,7 +356,7 @@ static const char* s_global_symbols[] = {
   "init_globals", "init_memory", "init_table", "LIKELY", "MEMCHECK", "Memory",
   "register_func_type", "REM_U", "ROTL", "ROTR", "s16", "s32", "s64", "s8",
   "Table", "trap", "Trap", "TRAP", "TRAP_CALL_INDIRECT", "TRAP_DIV_BY_ZERO",
-  "TRAP_INT_OVERFLOW", "TRAP_INVALID_CONVERSION", "TRAP_OOB",
+  "TRAP_INT_OVERFLOW", "TRAP_INVALID_CONVERSION", "TRAP_NONE", "TRAP_OOB",
   "TRAP_UNREACHABLE", "TRUNC_S", "TRUNC_U", "Type", "u16", "u32", "u64", "u8",
   "UNLIKELY", "UNREACHABLE",
 };
@@ -378,8 +378,8 @@ typedef float f32;
 typedef double f64;
 
 typedef enum Trap {
-  TRAP_OOB, TRAP_INT_OVERFLOW, TRAP_DIV_BY_ZERO, TRAP_INVALID_CONVERSION,
-  TRAP_UNREACHABLE, TRAP_CALL_INDIRECT } Trap;
+  TRAP_NONE, TRAP_OOB, TRAP_INT_OVERFLOW, TRAP_DIV_BY_ZERO,
+  TRAP_INVALID_CONVERSION, TRAP_UNREACHABLE, TRAP_CALL_INDIRECT } Trap;
 typedef enum Type { I32, I64, F32, F64 } Type;
 typedef void (*Anyfunc)();
 typedef struct Elem { u32 func_type; Anyfunc func; } Elem;

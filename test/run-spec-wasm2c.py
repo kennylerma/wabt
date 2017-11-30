@@ -115,11 +115,20 @@ class CWriter(object):
     self.module_idx = 0
 
   def Write(self):
+    self._WriteIncludes()
+    self.out_file.write("\nvoid run_tests(void) {\n\n")
     for command in self.commands:
       self._WriteCommand(command)
+    self.out_file.write("\n}\n")
 
   def _WriteFileAndLine(self, command):
     self.out_file.write('// %s:%d\n' % (self.source_filename, command['line']))
+
+  def _WriteIncludes(self):
+    for command in self.commands:
+      if command['type'] == 'module':
+        header = os.path.splitext(command['filename'])[0] + '.h'
+        self.out_file.write("#include \"%s\"\n" % header)
 
   def _WriteCommand(self, command):
     command_funcs = {
@@ -247,6 +256,8 @@ def main(args):
   parser = argparse.ArgumentParser()
   parser.add_argument('-o', '--out-dir', metavar='PATH',
                       help='output directory for files.')
+  parser.add_argument('-P', '--prefix', metavar='PATH', help='prefix file.',
+                      default=os.path.join(SCRIPT_DIR, 'spec-wasm2c-prefix.c'))
   parser.add_argument('--bindir', metavar='PATH',
                       default=find_exe.GetDefaultPath(),
                       help='directory to search for all executables.')
@@ -288,10 +299,10 @@ def main(args):
 
     all_commands = spec_json['commands']
     output = StringIO()
-    # if options.prefix:
-    #   with open(options.prefix) as prefix_file:
-    #     output.write(prefix_file.read())
-    #     output.write('\n')
+    if options.prefix:
+      with open(options.prefix) as prefix_file:
+        output.write(prefix_file.read())
+        output.write('\n')
 
     CWriter(out_dir, spec_json, output).Write()
 
