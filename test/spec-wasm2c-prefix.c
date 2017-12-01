@@ -1,11 +1,13 @@
 #include <assert.h>
 #define __STDC_FORMAT_MACROS
 #include <inttypes.h>
+#include <math.h>
 #include <setjmp.h>
 #include <stdarg.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 typedef struct FuncType {
   Type* params;
@@ -69,10 +71,55 @@ void error(const char* file, int line, const char* format, ...) {
     }                                                                    \
   } while (0)
 
+#define ASSERT_RETURN_NAN_T(type, itype, fmt, f, kind)                      \
+  do {                                                                      \
+    g_tests_run++;                                                          \
+    if (setjmp(g_jmp_buf) != 0) {                                           \
+      error(__FILE__, __LINE__, #f " trapped.\n");                          \
+    } else {                                                                \
+      type actual = f;                                                      \
+      itype iactual;                                                        \
+      memcpy(&iactual, &actual, sizeof(iactual));                           \
+      if (is_##kind##_nan_##type(iactual)) {                                \
+        g_tests_passed++;                                                   \
+      } else {                                                              \
+        error(__FILE__, __LINE__,                                           \
+              "in " #f ": expected result to be a " #kind " nan, got %" fmt \
+              ".\n",                                                        \
+              iactual);                                                     \
+      }                                                                     \
+    }                                                                       \
+  } while (0)
+
 #define ASSERT_RETURN_I32(f, expected) ASSERT_RETURN_T(u32, "u", f, expected)
 #define ASSERT_RETURN_I64(f, expected) ASSERT_RETURN_T(u64, PRIu64, f, expected)
 #define ASSERT_RETURN_F32(f, expected) ASSERT_RETURN_T(f32, ".9g", f, expected)
 #define ASSERT_RETURN_F64(f, expected) ASSERT_RETURN_T(f64, ".17g", f, expected)
+
+#define ASSERT_RETURN_CANONICAL_NAN_F32(f) \
+  ASSERT_RETURN_NAN_T(f32, u32, "08x", f, canonical)
+#define ASSERT_RETURN_CANONICAL_NAN_F64(f) \
+  ASSERT_RETURN_NAN_T(f64, u64, "016x", f, canonical)
+#define ASSERT_RETURN_ARITHMETIC_NAN_F32(f) \
+  ASSERT_RETURN_NAN_T(f32, u32, "08x", f, arithmetic)
+#define ASSERT_RETURN_ARITHMETIC_NAN_F64(f) \
+  ASSERT_RETURN_NAN_T(f64, u64, "016x", f, arithmetic)
+
+static int is_canonical_nan_f32(u32 x) {
+  return (x & 0x7fffff) == 0x400000;
+}
+
+static int is_canonical_nan_f64(u64 x) {
+  return (x & 0xfffffffffffff) == 0x8000000000000;
+}
+
+static int is_arithmetic_nan_f32(u32 x) {
+  return (x & 0x400000) == 0x400000;
+}
+
+static int is_arithmetic_nan_f64(u64 x) {
+  return (x & 0xfffffffffffff) == 0x8000000000000;
+}
 
 void trap(Trap code) {
   assert(code != TRAP_NONE);
