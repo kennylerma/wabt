@@ -107,16 +107,17 @@ def MangleName(s):
 
 class CWriter(object):
 
-  def __init__(self, base_dir, spec_json, out_file):
-    self.base_dir = base_dir
+  def __init__(self, spec_json, prefix, out_file):
     self.source_filename = os.path.basename(spec_json['source_filename'])
     self.commands = spec_json['commands']
     self.out_file = out_file
+    self.prefix = prefix
     self.module_idx = 0
 
   def Write(self):
     self._WriteIncludes()
-    self.out_file.write("\nvoid run_tests(void) {\n\n")
+    self.out_file.write(self.prefix)
+    self.out_file.write("\nvoid run_spec_tests(void) {\n\n")
     for command in self.commands:
       self._WriteCommand(command)
     self.out_file.write("\n}\n")
@@ -218,10 +219,6 @@ class CWriter(object):
     self.out_file.write('%s(%s);\n' % (
       assert_macro, self._Action(command['action'])))
 
-  def _Module(self, filename):
-    with open(os.path.join(self.base_dir, filename), 'rb') as wasm_file:
-      return ''.join('\\x%02x' % c for c in bytearray(wasm_file.read()))
-
   def _Constant(self, const):
     type_ = const['type']
     value = int(const['value'])
@@ -279,16 +276,11 @@ def main(args):
   options = parser.parse_args(args)
 
   with utils.TempDirectory(options.out_dir, 'run-spec-wasm2c-') as out_dir:
+    # Parse JSON file and generate main .c file with calls to test functions.
     wast2json = utils.Executable(
         find_exe.GetWast2JsonExecutable(options.bindir),
         error_cmdline=options.error_cmdline)
     wast2json.AppendOptionalArgs({'-v': options.verbose})
-
-    # wasm2c = utils.Executable(
-    #     find_exe.GetWasm2CExecutable(options.bindir),
-    #     error_cmdline=options.error_cmdline)
-
-    # cc = utils.Executable(options.cc, *options.cflags)
 
     json_file_path = utils.ChangeDir(
         utils.ChangeExt(options.file, '.json'), out_dir)
@@ -298,23 +290,37 @@ def main(args):
       spec_json = json.load(json_file)
 
     all_commands = spec_json['commands']
-    output = StringIO()
+    prefix = ''
     if options.prefix:
       with open(options.prefix) as prefix_file:
-        output.write(prefix_file.read())
-        output.write('\n')
+        prefix = prefix_file.read() + '\n'
 
-    CWriter(out_dir, spec_json, output).Write()
+    output = StringIO()
+    CWriter(spec_json, prefix, output).Write()
 
-  # if options.output:
-  #   out_file = open(options.output, 'w')
-  # else:
-  out_file = sys.stdout
+    main_filename = utils.ChangeExt(json_file_path,  '-main.c')
+    with open(main_filename, 'w') as out_main_file:
+      out_main_file.write(output.getvalue())
 
-  try:
-    out_file.write(output.getvalue())
-  finally:
-    out_file.close()
+    # Convert .wasm -> .c
+    wasm2c = utils.Executable(
+        find_exe.GetWasm2CExecutable(options.bindir),
+        error_cmdline=options.error_cmdline)
+
+    c_filenames = []
+    for command in all_commands:
+      if command['type'] == 'module':
+        wasm_filename = command['filename']
+        c_filename = utils.ChangeExt(wasm_filename, '.c')
+        c_filenames.append(c_filename)
+        wasm2c.RunWithArgs(wasm_filename, '-o', c_filename, cwd=out_dir)
+
+    # Compile and link all .c files
+    cc = utils.Executable(options.cc, *options.cflags)
+    c_filenames.append(os.path.basename(main_filename))
+
+    main_exe = os.path.basename(utils.ChangeExt(json_file_path, ''))
+    cc.RunWithArgs('-o', main_exe, *c_filenames, cwd=out_dir)
 
   return 0
 
@@ -323,5 +329,5 @@ if __name__ == '__main__':
   try:
     sys.exit(main(sys.argv[1:]))
   except Error as e:
-    sys.stderr.write(str(e) + '\n')
+    sys.stderr.write(e.message.encode('ascii', 'replace') + '\n')
     sys.exit(1)
