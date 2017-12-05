@@ -130,7 +130,7 @@ class CWriter(object):
       # This test doesn't have any valid modules, so just use a dummy instead.
       filename = utils.ChangeExt(self.source_filename, '-dummy.wasm')
       with open(os.path.join(self.out_dir, filename), 'wb') as wasm_file:
-        wasm_file.write('\x00\x61\x73\x6d\x01\x00\x00\x00')
+        wasm_file.write(b'\x00\x61\x73\x6d\x01\x00\x00\x00')
 
       dummy_command = {'type': 'module', 'line': 0, 'filename': filename}
       self.commands.insert(0, dummy_command)
@@ -344,5 +344,5 @@ if __name__ == '__main__':
   try:
     sys.exit(main(sys.argv[1:]))
   except Error as e:
-    sys.stderr.write(e.message.encode('ascii', 'replace') + '\n')
+    sys.stderr.write(u'%s\n' % e)
     sys.exit(1)
