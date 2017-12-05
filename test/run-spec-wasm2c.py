@@ -15,6 +15,7 @@
 # limitations under the License.
 #
 
+from __future__ import print_function
 import argparse
 try:
   from cStringIO import StringIO
@@ -78,7 +79,7 @@ def F32ToC(f32_bits):
   elif f32_bits == F32_NEG_INF:
     return '-INFINITY'
   elif IsNaNF32(f32_bits):
-    return 'NAN /*0x%08x*/' % f32_bits  # TODO(binji): specific NAN bit patterns
+    return 'make_nan_f32(0x%08x)' % f32_bits
   else:
     return '%sf' % repr(ReinterpretF32(f32_bits))
 
@@ -89,7 +90,7 @@ def F64ToC(f64_bits):
   elif f64_bits == F64_NEG_INF:
     return '-INFINITY'
   elif IsNaNF64(f64_bits):
-    return 'NAN /*0x%016x*/' % f64_bits  # TODO(binji): specific NAN bit patterns
+    return 'make_nan_f64(0x%016x)' % f64_bits
   else:
     # Use repr to get full precision
     return repr(ReinterpretF64(f64_bits))
@@ -107,20 +108,32 @@ def MangleName(s):
 
 class CWriter(object):
 
-  def __init__(self, spec_json, prefix, out_file):
+  def __init__(self, spec_json, prefix, out_file, out_dir):
     self.source_filename = os.path.basename(spec_json['source_filename'])
     self.commands = spec_json['commands']
     self.out_file = out_file
+    self.out_dir = out_dir
     self.prefix = prefix
     self.module_idx = 0
 
   def Write(self):
+    self._MaybeWriteDummyModule()
     self._WriteIncludes()
     self.out_file.write(self.prefix)
     self.out_file.write("\nvoid run_spec_tests(void) {\n\n")
     for command in self.commands:
       self._WriteCommand(command)
     self.out_file.write("\n}\n")
+
+  def _MaybeWriteDummyModule(self):
+    if not any(True for c in self.commands if c['type'] == 'module'):
+      # This test doesn't have any valid modules, so just use a dummy instead.
+      filename = utils.ChangeExt(self.source_filename, '-dummy.wasm')
+      with open(os.path.join(self.out_dir, filename), 'wb') as wasm_file:
+        wasm_file.write('\x00\x61\x73\x6d\x01\x00\x00\x00')
+
+      dummy_command = {'type': 'module', 'line': 0, 'filename': filename}
+      self.commands.insert(0, dummy_command)
 
   def _WriteFileAndLine(self, command):
     self.out_file.write('// %s:%d\n' % (self.source_filename, command['line']))
@@ -289,14 +302,13 @@ def main(args):
     with open(json_file_path) as json_file:
       spec_json = json.load(json_file)
 
-    all_commands = spec_json['commands']
     prefix = ''
     if options.prefix:
       with open(options.prefix) as prefix_file:
         prefix = prefix_file.read() + '\n'
 
     output = StringIO()
-    CWriter(spec_json, prefix, output).Write()
+    CWriter(spec_json, prefix, output, out_dir).Write()
 
     main_filename = utils.ChangeExt(json_file_path,  '-main.c')
     with open(main_filename, 'w') as out_main_file:
@@ -307,20 +319,23 @@ def main(args):
         find_exe.GetWasm2CExecutable(options.bindir),
         error_cmdline=options.error_cmdline)
 
+    module_filenames = [c['filename'] for c in spec_json['commands']
+                        if c['type'] == 'module']
     c_filenames = []
-    for command in all_commands:
-      if command['type'] == 'module':
-        wasm_filename = command['filename']
-        c_filename = utils.ChangeExt(wasm_filename, '.c')
-        c_filenames.append(c_filename)
-        wasm2c.RunWithArgs(wasm_filename, '-o', c_filename, cwd=out_dir)
+    for wasm_filename in module_filenames:
+      c_filename = utils.ChangeExt(wasm_filename, '.c')
+      c_filenames.append(c_filename)
+      wasm2c.RunWithArgs(wasm_filename, '-o', c_filename, cwd=out_dir)
 
     # Compile and link all .c files
     cc = utils.Executable(options.cc, *options.cflags)
     c_filenames.append(os.path.basename(main_filename))
 
     main_exe = os.path.basename(utils.ChangeExt(json_file_path, ''))
-    cc.RunWithArgs('-o', main_exe, *c_filenames, cwd=out_dir)
+    cc.RunWithArgs('-o', main_exe, '-lm', *c_filenames, cwd=out_dir)
+
+    utils.Executable(os.path.join(out_dir, main_exe),
+                     forward_stdout=True).RunWithArgs()
 
   return 0
 

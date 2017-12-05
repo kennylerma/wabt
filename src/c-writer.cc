@@ -363,6 +363,9 @@ static const char* s_global_symbols[] = {
 
 static const char s_header_top[] =
     R"(
+#ifndef WASM_RUNTIME_INCLUDED__
+#define WASM_RUNTIME_INCLUDED__
+
 #include <stdint.h>
 #include <stdlib.h>
 
@@ -391,6 +394,8 @@ extern u32 register_func_type(u32 params, u32 results, ...);
 extern void allocate_memory(Memory*, u32 page_size);
 extern void allocate_table(Table*, u32 element_size);
 extern void init(void);
+
+#endif  /* WASM_RUNTIME_INCLUDED__ */
 )";
 
 static const char s_source_includes[] = R"(#include <assert.h>
@@ -495,14 +500,14 @@ DEFINE_STORE(i64_store32, u32, u64);
 #define I32_ROTR(x, y) ROTR(x, y, 31)
 #define I64_ROTR(x, y) ROTR(x, y, 63)
 
-#define FMIN(x, y)             \
-   ((UNLIKELY((x) != (x))) ? x \
-  : (UNLIKELY((y) != (y))) ? y \
+#define FMIN(x, y)               \
+   ((UNLIKELY((x) != (x))) ? NAN \
+  : (UNLIKELY((y) != (y))) ? NAN \
   : (x < y) ? x : y)
 
-#define FMAX(x, y)             \
-   ((UNLIKELY((x) != (x))) ? x \
-  : (UNLIKELY((y) != (y))) ? y \
+#define FMAX(x, y)               \
+   ((UNLIKELY((x) != (x))) ? NAN \
+  : (UNLIKELY((y) != (y))) ? NAN \
   : (x > y) ? x : y)
 
 #define TRUNC_S(ut, ft, min, max, maxop, x)                                 \

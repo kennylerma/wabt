@@ -71,24 +71,24 @@ void error(const char* file, int line, const char* format, ...) {
     }                                                                    \
   } while (0)
 
-#define ASSERT_RETURN_NAN_T(type, itype, fmt, f, kind)                      \
-  do {                                                                      \
-    g_tests_run++;                                                          \
-    if (setjmp(g_jmp_buf) != 0) {                                           \
-      error(__FILE__, __LINE__, #f " trapped.\n");                          \
-    } else {                                                                \
-      type actual = f;                                                      \
-      itype iactual;                                                        \
-      memcpy(&iactual, &actual, sizeof(iactual));                           \
-      if (is_##kind##_nan_##type(iactual)) {                                \
-        g_tests_passed++;                                                   \
-      } else {                                                              \
-        error(__FILE__, __LINE__,                                           \
-              "in " #f ": expected result to be a " #kind " nan, got %" fmt \
-              ".\n",                                                        \
-              iactual);                                                     \
-      }                                                                     \
-    }                                                                       \
+#define ASSERT_RETURN_NAN_T(type, itype, fmt, f, kind)                        \
+  do {                                                                        \
+    g_tests_run++;                                                            \
+    if (setjmp(g_jmp_buf) != 0) {                                             \
+      error(__FILE__, __LINE__, #f " trapped.\n");                            \
+    } else {                                                                  \
+      type actual = f;                                                        \
+      itype iactual;                                                          \
+      memcpy(&iactual, &actual, sizeof(iactual));                             \
+      if (is_##kind##_nan_##type(iactual)) {                                  \
+        g_tests_passed++;                                                     \
+      } else {                                                                \
+        error(__FILE__, __LINE__,                                             \
+              "in " #f ": expected result to be a " #kind " nan, got 0x%" fmt \
+              ".\n",                                                          \
+              iactual);                                                       \
+      }                                                                       \
+    }                                                                         \
   } while (0)
 
 #define ASSERT_RETURN_I32(f, expected) ASSERT_RETURN_T(u32, "u", f, expected)
@@ -105,20 +105,32 @@ void error(const char* file, int line, const char* format, ...) {
 #define ASSERT_RETURN_ARITHMETIC_NAN_F64(f) \
   ASSERT_RETURN_NAN_T(f64, u64, "016x", f, arithmetic)
 
+static f32 make_nan_f32(u32 x) {
+  f32 res;
+  memcpy(&res, &x, sizeof(res));
+  return res;
+}
+
+static f64 make_nan_f64(u64 x) {
+  f64 res;
+  memcpy(&res, &x, sizeof(res));
+  return res;
+}
+
 static int is_canonical_nan_f32(u32 x) {
-  return (x & 0x7fffff) == 0x400000;
+  return (x & 0x7fffffff) == 0x7fc00000;
 }
 
 static int is_canonical_nan_f64(u64 x) {
-  return (x & 0xfffffffffffff) == 0x8000000000000;
+  return (x & 0x7fffffffffffffff) == 0x7ff8000000000000;
 }
 
 static int is_arithmetic_nan_f32(u32 x) {
-  return (x & 0x400000) == 0x400000;
+  return (x & 0x7fc00000) == 0x7fc00000;
 }
 
 static int is_arithmetic_nan_f64(u64 x) {
-  return (x & 0xfffffffffffff) == 0x8000000000000;
+  return (x & 0x7ff8000000000000) == 0x7ff8000000000000;
 }
 
 void trap(Trap code) {
@@ -183,7 +195,7 @@ void allocate_table(Table* table, u32 element_size) {
 int main(int argc, char** argv) {
   init();
   run_spec_tests();
-  fprintf(stderr, "%u/%u tests passed.\n", g_tests_passed, g_tests_run);
-  return 0;
+  printf("%u/%u tests passed.\n", g_tests_passed, g_tests_run);
+  return g_tests_passed != g_tests_run;
 }
 
