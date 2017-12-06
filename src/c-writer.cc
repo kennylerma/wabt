@@ -436,7 +436,7 @@ void init(void);
   if (UNLIKELY((a) + sizeof(t) > mem->size)) TRAP(OOB)
 
 #define DEFINE_LOAD(name, t1, t2, t3)              \
-  static inline t3 name(Memory* mem, u32 addr) {   \
+  static inline t3 name(Memory* mem, u64 addr) {   \
     MEMCHECK(mem, addr, t1);                       \
     t1 result;                                     \
     memcpy(&result, &mem->data[addr], sizeof(t1)); \
@@ -444,7 +444,7 @@ void init(void);
   }
 
 #define DEFINE_STORE(name, t1, t2)                           \
-  static inline void name(Memory* mem, u32 addr, t2 value) { \
+  static inline void name(Memory* mem, u64 addr, t2 value) { \
     MEMCHECK(mem, addr, t1);                                 \
     t1 wrapped = (t1)value;                                  \
     memcpy(&mem->data[addr], &wrapped, sizeof(t1));          \
@@ -2113,10 +2113,10 @@ void CWriter::Write(const LoadExpr& expr) {
 
   Type result_type = expr.opcode.GetResultType();
   Write(StackVar(0, result_type), " = ", func, "(&", GlobalName(memory->name),
-        ", ", StackVar(0));
+        ", (u64)(", StackVar(0));
   if (expr.offset != 0)
     Write(" + ", expr.offset);
-  Write(");", Newline());
+  Write("));", Newline());
   DropTypes(1);
   PushType(result_type);
 }
