@@ -392,13 +392,14 @@ typedef enum Trap {
 typedef enum Type { I32, I64, F32, F64 } Type;
 typedef void (*Anyfunc)();
 typedef struct Elem { u32 func_type; Anyfunc func; } Elem;
-typedef struct Memory { u8* data; size_t len; } Memory;
-typedef struct Table { Elem* data; size_t len; } Table;
+typedef struct Memory { u8* data; size_t pages, max_pages, size; } Memory;
+typedef struct Table { Elem* data; size_t size; } Table;
 
 extern void trap(Trap) __attribute__((noreturn));
 extern u32 register_func_type(u32 params, u32 results, ...);
-extern void allocate_memory(Memory*, u32 page_size);
-extern void allocate_table(Table*, u32 element_size);
+extern void allocate_memory(Memory*, u32 initial_pages, u32 max_pages);
+extern u32 grow_memory(Memory*, u32 pages);
+extern void allocate_table(Table*, u32 elements);
 extern void init(void);
 
 #endif  /* WASM_RUNTIME_INCLUDED__ */
@@ -426,13 +427,13 @@ void init(void);
 #define UNREACHABLE TRAP(UNREACHABLE)
 
 #define CALL_INDIRECT(table, t, ft, x, ...)                      \
-  (LIKELY((x) < table.len && table.data[x].func &&               \
+  (LIKELY((x) < table.size && table.data[x].func &&               \
           func_types[table.data[x].func_type] == func_types[ft]) \
        ? ((t)table.data[x].func)(__VA_ARGS__)                    \
        : TRAP(CALL_INDIRECT))
 
 #define MEMCHECK(mem, a, t)  \
-  if (UNLIKELY((a) + sizeof(t) > mem->len)) TRAP(OOB)
+  if (UNLIKELY((a) + sizeof(t) > mem->size)) TRAP(OOB)
 
 #define DEFINE_LOAD(name, t1, t2, t3)              \
   static inline t3 name(Memory* mem, u32 addr) {   \
@@ -1165,8 +1166,10 @@ void CWriter::WriteDataInitializers() {
 
   Write(Newline(), "static void init_memory(void) ", OpenBrace());
   if (memory) {
+    uint32_t max =
+        memory->page_limits.has_max ? memory->page_limits.max : UINT32_MAX;
     Write("allocate_memory(&", GlobalName(memory->name), ", ",
-          memory->page_limits.initial, ");", Newline());
+          memory->page_limits.initial, ", ", max, ");", Newline());
   }
   data_segment_index = 0;
   for (const DataSegment* data_segment : module_->data_segments) {
@@ -1580,9 +1583,15 @@ void CWriter::Write(const ExprList& exprs) {
         Write(*cast<ConvertExpr>(&expr));
         break;
 
-      case ExprType::CurrentMemory:
-        UNIMPLEMENTED("current_memory");
+      case ExprType::CurrentMemory: {
+        assert(module_->memories.size() == 1);
+        Memory* memory = module_->memories[0];
+
+        PushType(Type::I32);
+        Write(StackVar(0), " = ", GlobalName(memory->name), ".size;",
+              Newline());
         break;
+      }
 
       case ExprType::Drop:
         DropTypes(1);
@@ -1602,9 +1611,14 @@ void CWriter::Write(const ExprList& exprs) {
         break;
       }
 
-      case ExprType::GrowMemory:
-        UNIMPLEMENTED("grow_memory");
+      case ExprType::GrowMemory: {
+        assert(module_->memories.size() == 1);
+        Memory* memory = module_->memories[0];
+
+        Write(StackVar(0), " = grow_memory(&", GlobalName(memory->name), ", ",
+              StackVar(0), ");", Newline());
         break;
+      }
 
       case ExprType::If: {
         const IfExpr& if_ = *cast<IfExpr>(&expr);

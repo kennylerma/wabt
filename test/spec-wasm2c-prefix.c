@@ -10,6 +10,8 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define PAGE_SIZE 65536
+
 typedef struct FuncType {
   Type* params;
   Type* results;
@@ -224,14 +226,28 @@ u32 register_func_type(u32 param_count, u32 result_count, ...) {
   return idx + 1;
 }
 
-void allocate_memory(Memory* memory, u32 page_size) {
-  memory->len = page_size * 65536;
-  memory->data = calloc(memory->len, 1);
+void allocate_memory(Memory* memory, u32 initial_pages, u32 max_pages) {
+  memory->pages = initial_pages;
+  memory->max_pages = max_pages;
+  memory->size = initial_pages * PAGE_SIZE;
+  memory->data = calloc(memory->size, 1);
 }
 
-void allocate_table(Table* table, u32 element_size) {
-  table->len = element_size;
-  table->data = calloc(table->len, sizeof(Elem));
+u32 grow_memory(Memory* memory, u32 delta) {
+  u32 old_pages = memory->pages;
+  u32 new_pages = memory->pages + delta;
+  if (new_pages < old_pages || new_pages > memory->max_pages) {
+    return (u32)-1;
+  }
+  memory->data = realloc(memory->data, new_pages);
+  memory->pages = new_pages;
+  memory->size = new_pages * PAGE_SIZE;
+  return old_pages;
+}
+
+void allocate_table(Table* table, u32 elements) {
+  table->size = elements;
+  table->data = calloc(table->size, sizeof(Elem));
 }
 
 int main(int argc, char** argv) {
