@@ -339,7 +339,7 @@ static const char* s_global_symbols[] = {
 
   // defined
   "allocate_memory", "allocate_table", "Anyfunc", "CALL_INDIRECT",
-  "DEFINE_LOAD", "DEFINE_REINTERPRET", "DEFINE_STORE", "DIVREM_S", "DIVREM_U",
+  "DEFINE_LOAD", "DEFINE_REINTERPRET", "DEFINE_STORE", "DIVREM_U",
   "DIV_U", "Elem", "EXPORT_FUNC", "EXPORT_GLOBAL", "EXPORT_MEMORY",
   "EXPORT_TABLE", "f32", "F32", "f32_load", "f32_reinterpret_i32", "f32_store",
   "f64", "F64", "f64_load", "f64_reinterpret_i64", "f64_store", "FMAX", "FMIN",
@@ -356,9 +356,14 @@ static const char* s_global_symbols[] = {
   "init_globals", "init_memory", "init_table", "LIKELY", "MEMCHECK", "Memory",
   "register_func_type", "REM_U", "ROTL", "ROTR", "s16", "s32", "s64", "s8",
   "Table", "trap", "Trap", "TRAP", "TRAP_CALL_INDIRECT", "TRAP_DIV_BY_ZERO",
-  "TRAP_INT_OVERFLOW", "TRAP_INVALID_CONVERSION", "TRAP_NONE", "TRAP_OOB",
-  "TRAP_UNREACHABLE", "TRUNC_S", "TRUNC_U", "Type", "u16", "u32", "u64", "u8",
-  "UNLIKELY", "UNREACHABLE",
+  "TRAP_EXHAUSTION", "TRAP_INT_OVERFLOW", "TRAP_INVALID_CONVERSION",
+  "TRAP_NONE", "TRAP_OOB", "TRAP_UNREACHABLE", "TRUNC_S", "TRUNC_U", "Type",
+  "u16", "u32", "u64", "u8", "UNLIKELY", "UNREACHABLE",
+
+  // TODO(binji): sort and pack above.
+  "DIV_S", "REM_S", "F_REINTERPRET_I_T", "I_REINTERPRET_F_T", "SIGNBIT_T",
+  "ABS_S", "ABS_F32", "ABS_F64", "COPYSIGN_T", "COPYSIGN_F32", "COPYSIGN_F64",
+  "NEG_T", "NEG_F32", "NEG_F64",
 };
 
 static const char s_header_top[] =
@@ -382,7 +387,8 @@ typedef double f64;
 
 typedef enum Trap {
   TRAP_NONE, TRAP_OOB, TRAP_INT_OVERFLOW, TRAP_DIV_BY_ZERO,
-  TRAP_INVALID_CONVERSION, TRAP_UNREACHABLE, TRAP_CALL_INDIRECT } Trap;
+  TRAP_INVALID_CONVERSION, TRAP_UNREACHABLE, TRAP_CALL_INDIRECT,
+  TRAP_EXHAUSTION } Trap;
 typedef enum Type { I32, I64, F32, F64 } Type;
 typedef void (*Anyfunc)();
 typedef struct Elem { u32 func_type; Anyfunc func; } Elem;
@@ -419,10 +425,10 @@ void init(void);
 
 #define UNREACHABLE TRAP(UNREACHABLE)
 
-#define CALL_INDIRECT(table, t, ft, x, ...)        \
-  (LIKELY((x) < table.len && table.data[x].func && \
-          table.data[x].func_type == ft)           \
-       ? ((t)table.data[x].func)(__VA_ARGS__)      \
+#define CALL_INDIRECT(table, t, ft, x, ...)                      \
+  (LIKELY((x) < table.len && table.data[x].func &&               \
+          func_types[table.data[x].func_type] == func_types[ft]) \
+       ? ((t)table.data[x].func)(__VA_ARGS__)                    \
        : TRAP(CALL_INDIRECT))
 
 #define MEMCHECK(mem, a, t)  \
@@ -474,15 +480,20 @@ DEFINE_STORE(i64_store32, u32, u64);
 #define I32_POPCNT(x) (__builtin_popcount(x))
 #define I64_POPCNT(x) (__builtin_popcountll(x))
 
-#define DIVREM_S(op, ut, st, min, x, y)                      \
+#define DIV_S(ut, min, x, y)                                 \
    ((UNLIKELY((y) == 0)) ?                TRAP(DIV_BY_ZERO)  \
   : (UNLIKELY((x) == min && (y) == -1)) ? TRAP(INT_OVERFLOW) \
-  : (ut)((x) op (y)))
+  : (ut)((x) / (y)))
 
-#define I32_DIV_S(x, y) DIVREM_S(/, u32, s32, INT32_MIN, (s32)x, (s32)y)
-#define I64_DIV_S(x, y) DIVREM_S(/, u64, s64, INT64_MIN, (s64)x, (s64)y)
-#define I32_REM_S(x, y) DIVREM_S(%, u32, s32, INT32_MIN, (s32)x, (s32)y)
-#define I64_REM_S(x, y) DIVREM_S(%, u64, s64, INT64_MIN, (s64)x, (s64)y)
+#define REM_S(ut, min, x, y)                                \
+   ((UNLIKELY((y) == 0)) ?                TRAP(DIV_BY_ZERO) \
+  : (UNLIKELY((x) == min && (y) == -1)) ? 0                 \
+  : (ut)((x) % (y)))
+
+#define I32_DIV_S(x, y) DIV_S(u32, INT32_MIN, (s32)x, (s32)y)
+#define I64_DIV_S(x, y) DIV_S(u64, INT64_MIN, (s64)x, (s64)y)
+#define I32_REM_S(x, y) REM_S(u32, INT32_MIN, (s32)x, (s32)y)
+#define I64_REM_S(x, y) REM_S(u64, INT64_MIN, (s64)x, (s64)y)
 
 #define DIVREM_U(op, x, y) \
   ((UNLIKELY((y) == 0)) ? TRAP(DIV_BY_ZERO) : ((x) op (y)))
@@ -1470,12 +1481,12 @@ void CWriter::Write(const ExprList& exprs) {
         const Var& var = cast<BrIfExpr>(&expr)->var;
         const Label* label = FindLabel(var);
         Write("if (", StackVar(0), ") ");
+        DropTypes(1);
         if (label->HasValue()) {
           Write("{", CopyLabelVar(*label), " goto ", var, ";}", Newline());
         } else {
           Write(GotoLabel(var), Newline());
         }
-        DropTypes(1);
         break;
       }
 
@@ -1499,7 +1510,8 @@ void CWriter::Write(const ExprList& exprs) {
         if (label->HasValue())
           Write(CopyLabelVar(*label), "; ");
         Write(GotoLabel(bt_expr->default_target), CloseBrace(), Newline());
-        break;
+        // Stop processing this ExprList, since the following are unreachable.
+        return;
       }
 
       case ExprType::Call: {

@@ -4,6 +4,7 @@
 #include <math.h>
 #include <setjmp.h>
 #include <stdarg.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -43,6 +44,25 @@ void error(const char* file, int line, const char* format, ...) {
     }                                                          \
   } while (0)
 
+#define ASSERT_EXHAUSTION(f)                                      \
+  do {                                                            \
+    g_tests_run++;                                                \
+    switch (setjmp(g_jmp_buf)) {                                  \
+      case 0:                                                     \
+        (void)(f);                                                \
+        error(__FILE__, __LINE__, "expected " #f " to trap.\n");  \
+        break;                                                    \
+      case TRAP_EXHAUSTION:                                       \
+        g_tests_passed++;                                         \
+        break;                                                    \
+      default:                                                    \
+        error(__FILE__, __LINE__,                                 \
+              "expected " #f                                      \
+              " to trap due to exhaustion, got trap code %d.\n"); \
+        break;                                                    \
+    }                                                             \
+  } while (0)
+
 #define ASSERT_RETURN(f)                           \
   do {                                             \
     g_tests_run++;                                 \
@@ -61,7 +81,7 @@ void error(const char* file, int line, const char* format, ...) {
       error(__FILE__, __LINE__, #f " trapped.\n");                       \
     } else {                                                             \
       type actual = f;                                                   \
-      if (actual == expected) {                                          \
+      if (is_equal_##type(actual, expected)) {                           \
         g_tests_passed++;                                                \
       } else {                                                           \
         error(__FILE__, __LINE__,                                        \
@@ -105,6 +125,28 @@ void error(const char* file, int line, const char* format, ...) {
 #define ASSERT_RETURN_ARITHMETIC_NAN_F64(f) \
   ASSERT_RETURN_NAN_T(f64, u64, "016x", f, arithmetic)
 
+static bool is_equal_u32(u32 x, u32 y) {
+  return x == y;
+}
+
+static bool is_equal_u64(u64 x, u64 y) {
+  return x == y;
+}
+
+static bool is_equal_f32(f32 x, f32 y) {
+  u32 ux, uy;
+  memcpy(&ux, &x, sizeof(ux));
+  memcpy(&uy, &y, sizeof(uy));
+  return ux == uy;
+}
+
+static bool is_equal_f64(f64 x, f64 y) {
+  u64 ux, uy;
+  memcpy(&ux, &x, sizeof(ux));
+  memcpy(&uy, &y, sizeof(uy));
+  return ux == uy;
+}
+
 static f32 make_nan_f32(u32 x) {
   f32 res;
   memcpy(&res, &x, sizeof(res));
@@ -117,19 +159,19 @@ static f64 make_nan_f64(u64 x) {
   return res;
 }
 
-static int is_canonical_nan_f32(u32 x) {
+static bool is_canonical_nan_f32(u32 x) {
   return (x & 0x7fffffff) == 0x7fc00000;
 }
 
-static int is_canonical_nan_f64(u64 x) {
+static bool is_canonical_nan_f64(u64 x) {
   return (x & 0x7fffffffffffffff) == 0x7ff8000000000000;
 }
 
-static int is_arithmetic_nan_f32(u32 x) {
+static bool is_arithmetic_nan_f32(u32 x) {
   return (x & 0x7fc00000) == 0x7fc00000;
 }
 
-static int is_arithmetic_nan_f64(u64 x) {
+static bool is_arithmetic_nan_f64(u64 x) {
   return (x & 0x7ff8000000000000) == 0x7ff8000000000000;
 }
 
@@ -138,7 +180,7 @@ void trap(Trap code) {
   longjmp(g_jmp_buf, code);
 }
 
-static int func_types_are_equal(FuncType* a, FuncType* b) {
+static bool func_types_are_equal(FuncType* a, FuncType* b) {
   if (a->param_count != b->param_count || a->result_count != b->result_count)
     return 0;
   int i;
