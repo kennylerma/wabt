@@ -363,7 +363,9 @@ static const char* s_global_symbols[] = {
   // TODO(binji): sort and pack above.
   "DIV_S", "REM_S", "F_REINTERPRET_I_T", "I_REINTERPRET_F_T", "SIGNBIT_T",
   "ABS_S", "ABS_F32", "ABS_F64", "COPYSIGN_T", "COPYSIGN_F32", "COPYSIGN_F64",
-  "NEG_T", "NEG_F32", "NEG_F64",
+  "NEG_T", "NEG_F32", "NEG_F64", "PREFIX",
+
+  "grow_memory",
 };
 
 static const char s_header_top[] =
@@ -385,6 +387,13 @@ typedef int64_t s64;
 typedef float f32;
 typedef double f64;
 
+#ifndef MODULE_PREFIX
+#define MODULE_PREFIX
+#endif
+
+#define PASTE_(x, y) x ## y
+#define PASTE(x, y) PASTE_(x, y)
+
 typedef enum Trap {
   TRAP_NONE, TRAP_OOB, TRAP_INT_OVERFLOW, TRAP_DIV_BY_ZERO,
   TRAP_INVALID_CONVERSION, TRAP_UNREACHABLE, TRAP_CALL_INDIRECT,
@@ -400,7 +409,7 @@ extern u32 register_func_type(u32 params, u32 results, ...);
 extern void allocate_memory(Memory*, u32 initial_pages, u32 max_pages);
 extern u32 grow_memory(Memory*, u32 pages);
 extern void allocate_table(Table*, u32 elements);
-extern void init(void);
+extern void PASTE(MODULE_PREFIX, init)(void);
 
 #endif  /* WASM_RUNTIME_INCLUDED__ */
 )";
@@ -412,7 +421,7 @@ static const char s_source_includes[] = R"(#include <assert.h>
 )";
 
 static const char s_source_declarations[] = R"(
-void init(void);
+void PASTE(MODULE_PREFIX, init)(void);
 
 #define UNLIKELY(x) __builtin_expect(!!(x), 0)
 #define LIKELY(x) __builtin_expect(!!(x), 1)
@@ -512,25 +521,27 @@ DEFINE_STORE(i64_store32, u32, u64);
 #define I32_ROTR(x, y) ROTR(x, y, 31)
 #define I64_ROTR(x, y) ROTR(x, y, 63)
 
-#define FMIN(x, y)               \
-   ((UNLIKELY((x) != (x))) ? NAN \
-  : (UNLIKELY((y) != (y))) ? NAN \
+#define FMIN(x, y)                                          \
+   ((UNLIKELY((x) != (x))) ? NAN                            \
+  : (UNLIKELY((y) != (y))) ? NAN                            \
+  : (UNLIKELY((x) == 0 && (y) == 0)) ? (signbit(x) ? x : y) \
   : (x < y) ? x : y)
 
-#define FMAX(x, y)               \
-   ((UNLIKELY((x) != (x))) ? NAN \
-  : (UNLIKELY((y) != (y))) ? NAN \
+#define FMAX(x, y)                                          \
+   ((UNLIKELY((x) != (x))) ? NAN                            \
+  : (UNLIKELY((y) != (y))) ? NAN                            \
+  : (UNLIKELY((x) == 0 && (y) == 0)) ? (signbit(x) ? y : x) \
   : (x > y) ? x : y)
 
-#define TRUNC_S(ut, ft, min, max, maxop, x)                                 \
+#define TRUNC_S(ut, st, ft, min, max, maxop, x)                             \
    ((UNLIKELY((x) != (x))) ? TRAP(INVALID_CONVERSION)                       \
   : (UNLIKELY((x) < (ft)(min) || (x) maxop (ft)(max))) ? TRAP(INT_OVERFLOW) \
-  : (ut)(x))
+  : (ut)(st)(x))
 
-#define I32_TRUNC_S_F32(x) TRUNC_S(u32, f32, INT32_MIN, INT32_MAX, >=, (s32)x)
-#define I64_TRUNC_S_F32(x) TRUNC_S(u64, f32, INT64_MIN, INT64_MAX, >=, (s64)x)
-#define I32_TRUNC_S_F64(x) TRUNC_S(u32, f64, INT32_MIN, INT32_MAX, >,  (s32)x)
-#define I64_TRUNC_S_F64(x) TRUNC_S(u64, f64, INT64_MIN, INT64_MAX, >=, (s64)x)
+#define I32_TRUNC_S_F32(x) TRUNC_S(u32, s32, f32, INT32_MIN, INT32_MAX, >=, x)
+#define I64_TRUNC_S_F32(x) TRUNC_S(u64, s64, f32, INT64_MIN, INT64_MAX, >=, x)
+#define I32_TRUNC_S_F64(x) TRUNC_S(u32, s32, f64, INT32_MIN, INT32_MAX, >,  x)
+#define I64_TRUNC_S_F64(x) TRUNC_S(u64, s64, f64, INT64_MIN, INT64_MAX, >=, x)
 
 #define TRUNC_U(ut, ft, max, maxop, x)                                    \
    ((UNLIKELY((x) != (x))) ? TRAP(INVALID_CONVERSION)                     \
@@ -893,20 +904,48 @@ void CWriter::Write(const Const& const_) {
       break;
 
     case Type::F32: {
-      // TODO(binji): Don't use hexfloats to be C89 compatible?
-      char buffer[128];
-      WriteFloatHex(buffer, 128, const_.f32_bits);
-      Writef("%s /*=%g*/", buffer, Bitcast<float>(const_.f32_bits));
+      // TODO(binji): Share with similar float info in interp.cc and literal.cc
+      if ((const_.f32_bits & 0x7f800000u) == 0x7f800000u) {
+        const char* sign = (const_.f32_bits & 0x80000000) ? "-" : "";
+        uint32_t significand = const_.f32_bits & 0x7fffffu;
+        if (significand == 0) {
+          // Infinity.
+          Writef("%sINFINITY", sign);
+        } else {
+          // Nan.
+          Writef("f32_reinterpret_i32(0x%08x) /* %snan:0x%06x */",
+                 const_.f32_bits, sign, significand);
+        }
+      } else if (const_.f32_bits == 0x80000000) {
+        // Negative zero. Special-cased so it isn't written as -0 below.
+        Writef("-0.f");
+      } else {
+        Writef("%.9g", Bitcast<float>(const_.f32_bits));
+      }
       break;
     }
 
-    case Type::F64: {
-      // TODO(binji): Don't use hexfloats to be C89 compatible?
-      char buffer[128];
-      WriteDoubleHex(buffer, 128, const_.f64_bits);
-      Writef("%s /*=%g*/", buffer, Bitcast<double>(const_.f64_bits));
+    case Type::F64:
+      // TODO(binji): Share with similar float info in interp.cc and literal.cc
+      if ((const_.f64_bits & 0x7ff0000000000000ull) == 0x7ff0000000000000ull) {
+        const char* sign = (const_.f64_bits & 0x8000000000000000ull) ? "-" : "";
+        uint64_t significand = const_.f64_bits & 0xfffffffffffffull;
+        if (significand == 0) {
+          // Infinity.
+          Writef("%sINFINITY", sign);
+        } else {
+          // Nan.
+          Writef("f64_reinterpret_i64(0x%016" PRIx64 ") /* %snan:0x%013" PRIx64
+                 " */",
+                 const_.f64_bits, sign, significand);
+        }
+      } else if (const_.f64_bits == 0x8000000000000000ull) {
+        // Negative zero. Special-cased so it isn't written as -0 below.
+        Writef("-0.0");
+      } else {
+        Writef("%.17g", Bitcast<double>(const_.f64_bits));
+      }
       break;
-    }
 
     default:
       WABT_UNREACHABLE;
@@ -1332,7 +1371,8 @@ void CWriter::WriteFuncs() {
 
 void CWriter::Write(const Func& func) {
   func_ = &func;
-  local_syms_.clear();
+  // Copy symbols from global symbol table so we don't shadow them.
+  local_syms_ = global_syms_;
   local_sym_map_.clear();
   stack_var_sym_map_.clear();
 
@@ -1501,18 +1541,19 @@ void CWriter::Write(const ExprList& exprs) {
         const Label* label;
         for (const Var& var : bt_expr->targets) {
           label = FindLabel(var);
-          Write(Newline(), "case ", i, ": ");
+          Write("case ", i, ": ");
           if (label->HasValue())
             Write(CopyLabelVar(*label), "; ");
-          Write(GotoLabel(var));
+          Write(GotoLabel(var), Newline());
           ++i;
         }
 
         label = FindLabel(bt_expr->default_target);
-        Write(Newline(), "default: ");
+        Write("default: ");
         if (label->HasValue())
           Write(CopyLabelVar(*label), "; ");
-        Write(GotoLabel(bt_expr->default_target), CloseBrace(), Newline());
+        Write(GotoLabel(bt_expr->default_target), Newline(), CloseBrace(),
+              Newline());
         // Stop processing this ExprList, since the following are unreachable.
         return;
       }
@@ -1645,15 +1686,17 @@ void CWriter::Write(const ExprList& exprs) {
 
       case ExprType::Loop: {
         const Block& block = cast<LoopExpr>(&expr)->block;
-        Write(DefineLocalName(block.label), ": ");
-        Indent();
-        size_t mark = MarkTypeStack();
-        PushLabel(LabelType::Loop, block.label, block.sig);
-        Write(Newline(), block.exprs);
-        ResetTypeStack(mark);
-        PopLabel();
-        PushTypes(block.sig);
-        Dedent();
+        if (!block.exprs.empty()) {
+          Write(DefineLocalName(block.label), ": ");
+          Indent();
+          size_t mark = MarkTypeStack();
+          PushLabel(LabelType::Loop, block.label, block.sig);
+          Write(Newline(), block.exprs);
+          ResetTypeStack(mark);
+          PopLabel();
+          PushTypes(block.sig);
+          Dedent();
+        }
         break;
       }
 
