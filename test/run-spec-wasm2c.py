@@ -36,17 +36,9 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 F32_INF = 0x7f800000
 F32_NEG_INF = 0xff800000
 F32_NEG_ZERO = 0x80000000
-F32_SIGN_BIT = F32_NEG_ZERO
-F32_SIG_MASK = 0x7fffff
-F32_QUIET_NAN = 0x7fc00000
-F32_QUIET_NAN_TAG = 0x400000
 F64_INF = 0x7ff0000000000000
 F64_NEG_INF = 0xfff0000000000000
 F64_NEG_ZERO = 0x8000000000000000
-F64_SIGN_BIT = F64_NEG_ZERO
-F64_SIG_MASK = 0xfffffffffffff
-F64_QUIET_NAN = 0x7ff8000000000000
-F64_QUIET_NAN_TAG = 0x8000000000000
 
 
 def I32ToC(value):
@@ -96,14 +88,28 @@ def F64ToC(f64_bits):
     return repr(ReinterpretF64(f64_bits))
 
 
-def MangleName(s):
-  result = 'Z_'
+def MangleName(module_name, s):
+  result = module_name + 'Z_'
   for c in s:
     if (c.isalnum() and c != 'Z') or c == '_':
       result += c
     else:
       result += 'Z%02X' % ord(c)
   return result
+
+
+def ModuleIdxName(idx):
+  return 'MOD%d_' % idx
+
+
+# TODO(binji): cleanup
+module_names = {}
+
+def AddModuleByName(name, idx):
+  module_names[name] = idx
+
+def ModuleName(name):
+  return module_names[name]
 
 
 class CWriter(object):
@@ -139,10 +145,15 @@ class CWriter(object):
     self.out_file.write('// %s:%d\n' % (self.source_filename, command['line']))
 
   def _WriteIncludes(self):
+    idx = 1
     for command in self.commands:
       if command['type'] == 'module':
         header = os.path.splitext(command['filename'])[0] + '.h'
+        self.out_file.write(
+            '#define MODULE_PREFIX %s\n' % self._ModuleIdxName(idx))
         self.out_file.write("#include \"%s\"\n" % header)
+        self.out_file.write('#undef MODULE_PREFIX\n\n')
+        idx += 1
 
   def _WriteCommand(self, command):
     command_funcs = {
@@ -166,17 +177,16 @@ class CWriter(object):
       func(command)
       self.out_file.write('\n')
 
-  def _ModuleIdxName(self):
-    return '$%d' % self.module_idx
+  def _ModuleIdxName(self, idx=None):
+    idx = idx or self.module_idx
+    return ModuleIdxName(idx)
 
   def _WriteModuleCommand(self, command):
     self.module_idx += 1
-    idx_name = self._ModuleIdxName()
+    self.out_file.write('%sinit();\n' % self._ModuleIdxName())
 
-    # self.out_file.write('let %s = instance("%s");\n' %
-    #                     (idx_name, self._Module(command['filename'])))
-    # if 'name' in command:
-    #   self.out_file.write('let %s = %s;\n' % (command['name'], idx_name))
+    if 'name' in command:
+      AddModuleByName(command['name'], self.module_idx)
 
   def _WriteActionCommand(self, command):
     self.out_file.write('%s;\n' % self._Action(command['action']))
@@ -251,15 +261,37 @@ class CWriter(object):
 
   def _Action(self, action):
     type_ = action['type']
-    # TODO(binji): figure out how to do multiple instances.
-    # module = action.get('module', self._ModuleIdxName())
-    field = MangleName(action['field'])
+
+    if 'module' in action:
+      module_name = self._ModuleIdxName(ModuleName(action['module']))
+    else:
+      module_name = self._ModuleIdxName()
+
+    field = MangleName(module_name, action['field'])
     if type_ == 'invoke':
       return '%s(%s)' % (field, self._ConstantList(action.get('args', [])))
     elif type_ == 'get':
       return field
     else:
       raise Error('Unexpected action type: %s' % type_)
+
+
+# NOTE: still broken
+#
+# * call_indirect
+# * call
+# * elem
+# * fac
+# * func_ptrs
+# * func
+# * imports
+# * linking
+# * memory_trap
+# * memory
+# * names
+# * resizing
+# * skip-stack-guard-page
+# * start
 
 
 def main(args):
@@ -321,18 +353,25 @@ def main(args):
 
     module_filenames = [c['filename'] for c in spec_json['commands']
                         if c['type'] == 'module']
-    c_filenames = []
+
+    # Compile all .c files to .o files
+    cc = utils.Executable(options.cc, *options.cflags)
+    o_filenames = []
+
+    i = 1
     for wasm_filename in module_filenames:
       c_filename = utils.ChangeExt(wasm_filename, '.c')
-      c_filenames.append(c_filename)
+      o_filename = utils.ChangeExt(wasm_filename, '.o')
+      o_filenames.append(o_filename)
       wasm2c.RunWithArgs(wasm_filename, '-o', c_filename, cwd=out_dir)
+      cc.RunWithArgs('-c', '-o', o_filename,
+                     '-DMODULE_PREFIX=%s' % ModuleIdxName(i),
+                     c_filename, cwd=out_dir)
+      i += 1
 
-    # Compile and link all .c files
-    cc = utils.Executable(options.cc, *options.cflags)
-    c_filenames.append(os.path.basename(main_filename))
-
+    main_c = os.path.basename(main_filename)
     main_exe = os.path.basename(utils.ChangeExt(json_file_path, ''))
-    cc.RunWithArgs('-o', main_exe, '-lm', *c_filenames, cwd=out_dir)
+    cc.RunWithArgs('-o', main_exe, '-lm', main_c, *o_filenames, cwd=out_dir)
 
     utils.Executable(os.path.join(out_dir, main_exe),
                      forward_stdout=True).RunWithArgs()

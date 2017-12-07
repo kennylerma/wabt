@@ -251,7 +251,6 @@ void allocate_table(Table* table, u32 elements) {
 }
 
 int main(int argc, char** argv) {
-  init();
   run_spec_tests();
   printf("%u/%u tests passed.\n", g_tests_passed, g_tests_run);
   return g_tests_passed != g_tests_run;

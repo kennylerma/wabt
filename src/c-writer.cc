@@ -163,6 +163,7 @@ class CWriter {
 
   std::string MangleName(string_view);
   std::string MangleName(string_view, string_view);
+  std::string MangleNameWithModulePrefix(string_view);
   std::string LegalizeName(string_view);
   std::string DefineName(SymbolSet*, string_view);
   std::string DefineImportName(const std::string&, string_view, string_view);
@@ -361,11 +362,7 @@ static const char* s_global_symbols[] = {
   "u16", "u32", "u64", "u8", "UNLIKELY", "UNREACHABLE",
 
   // TODO(binji): sort and pack above.
-  "DIV_S", "REM_S", "F_REINTERPRET_I_T", "I_REINTERPRET_F_T", "SIGNBIT_T",
-  "ABS_S", "ABS_F32", "ABS_F64", "COPYSIGN_T", "COPYSIGN_F32", "COPYSIGN_F64",
-  "NEG_T", "NEG_F32", "NEG_F64", "PREFIX",
-
-  "grow_memory",
+  "DIV_S", "REM_S", "ADD_PREFIX", "MODULE_PREFIX", "grow_memory",
 };
 
 static const char s_header_top[] =
@@ -393,6 +390,7 @@ typedef double f64;
 
 #define PASTE_(x, y) x ## y
 #define PASTE(x, y) PASTE_(x, y)
+#define ADD_PREFIX(x) PASTE(MODULE_PREFIX, x)
 
 typedef enum Trap {
   TRAP_NONE, TRAP_OOB, TRAP_INT_OVERFLOW, TRAP_DIV_BY_ZERO,
@@ -409,9 +407,10 @@ extern u32 register_func_type(u32 params, u32 results, ...);
 extern void allocate_memory(Memory*, u32 initial_pages, u32 max_pages);
 extern u32 grow_memory(Memory*, u32 pages);
 extern void allocate_table(Table*, u32 elements);
-extern void PASTE(MODULE_PREFIX, init)(void);
 
 #endif  /* WASM_RUNTIME_INCLUDED__ */
+
+extern void ADD_PREFIX(init)(void);
 )";
 
 static const char s_source_includes[] = R"(#include <assert.h>
@@ -421,13 +420,13 @@ static const char s_source_includes[] = R"(#include <assert.h>
 )";
 
 static const char s_source_declarations[] = R"(
-void PASTE(MODULE_PREFIX, init)(void);
+void ADD_PREFIX(init)(void);
 
 #define UNLIKELY(x) __builtin_expect(!!(x), 0)
 #define LIKELY(x) __builtin_expect(!!(x), 1)
 
 #define EXPORT_FUNC(decl, name) decl __attribute__((alias(#name)))
-#define EXPORT_GLOBAL(sym, name) extern int sym __attribute__((alias(#name)))
+#define EXPORT_GLOBAL(decl, name) extern decl __attribute__((alias(#name)))
 #define EXPORT_MEMORY(sym, name) extern Memory sym __attribute__((alias(#name)))
 #define EXPORT_TABLE(sym, name) extern Table sym __attribute__((alias(#name)))
 
@@ -652,6 +651,10 @@ std::string CWriter::MangleName(string_view name) {
 
 std::string CWriter::MangleName(string_view module, string_view field) {
   return MangleName(module) + MangleName(field);
+}
+
+std::string CWriter::MangleNameWithModulePrefix(string_view name) {
+  return "ADD_PREFIX(" + MangleName(name) + ")";
 }
 
 std::string CWriter::LegalizeName(string_view name) {
@@ -1042,6 +1045,7 @@ void CWriter::WriteImports() {
         const Global& global = cast<GlobalImport>(import)->global;
         WriteGlobal(global, DefineImportName(global.name, import->module_name,
                                              import->field_name));
+        Write(";", Newline());
         break;
       }
 
@@ -1108,6 +1112,7 @@ void CWriter::WriteGlobals() {
       if (!is_import) {
         Write("static ");
         WriteGlobal(*global, DefineGlobalName(global->name));
+        Write(";", Newline());
       }
       ++global_index;
     }
@@ -1129,7 +1134,7 @@ void CWriter::WriteGlobals() {
 }
 
 void CWriter::WriteGlobal(const Global& global, const std::string& name) {
-  Write(global.type, " ", name, ";", Newline());
+  Write(global.type, " ", name);
 }
 
 void CWriter::WriteMemories() {
@@ -1269,7 +1274,7 @@ void CWriter::WriteElemInitializers() {
 }
 
 void CWriter::WriteInit() {
-  Write(Newline(), "void init(void) ", OpenBrace());
+  Write(Newline(), "void ADD_PREFIX(init)(void) ", OpenBrace());
   Write("init_func_types();", Newline());
   Write("init_globals();", Newline());
   Write("init_memory();", Newline());
@@ -1287,7 +1292,7 @@ void CWriter::WriteHeaderExports() {
   Write(Newline());
 
   for (const Export* export_ : module_->exports) {
-    std::string mangled_name = MangleName(export_->name);
+    std::string mangled_name = MangleNameWithModulePrefix(export_->name);
 
     switch (export_->kind) {
       case ExternalKind::Func:
@@ -1297,7 +1302,9 @@ void CWriter::WriteHeaderExports() {
         break;
 
       case ExternalKind::Global:
+        Write("extern ");
         WriteGlobal(*module_->GetGlobal(export_->var), mangled_name);
+        Write(";", Newline());
         break;
 
       case ExternalKind::Memory:
@@ -1322,40 +1329,40 @@ void CWriter::WriteExports() {
   Write(Newline());
 
   for (const Export* export_ : module_->exports) {
-    const char* macro;
     std::string name;
+    std::string mangled_name = MangleNameWithModulePrefix(export_->name);
 
     switch (export_->kind) {
       case ExternalKind::Func: {
         const Func* func = module_->GetFunc(export_->var);
         Write("EXPORT_FUNC(");
-        WriteFuncDeclaration(func->decl, MangleName(export_->name));
-        Write(", ", GlobalName(func->name), ");", Newline());
+        WriteFuncDeclaration(func->decl, mangled_name);
+        name = func->name;
         break;
       }
 
-      case ExternalKind::Global:
-        macro = "EXPORT_GLOBAL";
-        name = module_->GetGlobal(export_->var)->name;
-        goto common;
+      case ExternalKind::Global: {
+        const Global* global = module_->GetGlobal(export_->var);
+        Write("EXPORT_GLOBAL(");
+        WriteGlobal(*global, mangled_name);
+        name = global->name;
+        break;
+      }
 
       case ExternalKind::Memory:
-        macro = "EXPORT_MEMORY";
+        Write("EXPORT_MEMORY(", mangled_name);
         name = module_->GetMemory(export_->var)->name;
-        goto common;
+        break;
 
       case ExternalKind::Table:
-        macro = "EXPORT_TABLE";
+        Write("EXPORT_TABLE(", mangled_name);
         name = module_->GetTable(export_->var)->name;
-        goto common;
-
-      common:
-        Write(macro, "(", MangleName(export_->name), ", ", GlobalName(name),
-              ");", Newline());
         break;
 
       default: WABT_UNREACHABLE;
     }
+
+    Write(", ", GlobalName(name), ");", Newline());
   }
 }
 
