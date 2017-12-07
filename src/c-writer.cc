@@ -339,40 +339,48 @@ static const char* s_global_symbols[] = {
   "strtok", "strxfrm",
 
   // defined
-  "allocate_memory", "allocate_table", "Anyfunc", "CALL_INDIRECT",
+  "wasm_rt_allocate_memory", "wasm_rt_allocate_table", "wasm_rt_anyfunc_t", "CALL_INDIRECT",
   "DEFINE_LOAD", "DEFINE_REINTERPRET", "DEFINE_STORE", "DIVREM_U",
-  "DIV_U", "Elem", "EXPORT_FUNC", "EXPORT_GLOBAL", "EXPORT_MEMORY",
-  "EXPORT_TABLE", "f32", "F32", "f32_load", "f32_reinterpret_i32", "f32_store",
-  "f64", "F64", "f64_load", "f64_reinterpret_i64", "f64_store", "FMAX", "FMIN",
-  "I32", "I32_CLZ", "I32_CLZ", "I32_DIV_S", "i32_load", "i32_load16_s",
+  "DIV_U", "wasm_rt_elem_t", "EXPORT_FUNC", "EXPORT_GLOBAL", "EXPORT_MEMORY",
+  "EXPORT_TABLE", "f32", "WASM_RT_F32", "f32_load", "f32_reinterpret_i32", "f32_store",
+  "f64", "WASM_RT_F64", "f64_load", "f64_reinterpret_i64", "f64_store", "FMAX", "FMIN",
+  "WASM_RT_I32", "I32_CLZ", "I32_CLZ", "I32_DIV_S", "i32_load", "i32_load16_s",
   "i32_load16_u", "i32_load8_s", "i32_load8_u", "I32_POPCNT",
   "i32_reinterpret_f32", "I32_REM_S", "I32_ROTL", "I32_ROTR", "i32_store",
   "i32_store16", "i32_store8", "I32_TRUNC_S_F32", "I32_TRUNC_S_F64",
-  "I32_TRUNC_U_F32", "I32_TRUNC_U_F64", "I64", "I64_CTZ", "I64_CTZ",
+  "I32_TRUNC_U_F32", "I32_TRUNC_U_F64", "WASM_RT_I64", "I64_CTZ", "I64_CTZ",
   "I64_DIV_S", "i64_load", "i64_load16_s", "i64_load16_u", "i64_load32_s",
   "i64_load32_u", "i64_load8_s", "i64_load8_u",
   "I64_POPCNT", "i64_reinterpret_f64", "I64_REM_S", "I64_ROTL", "I64_ROTR",
   "i64_store", "i64_store16", "i64_store32", "i64_store8", "I64_TRUNC_S_F32",
   "I64_TRUNC_S_F64", "I64_TRUNC_U_F32", "I64_TRUNC_U_F64", "init",
-  "init_globals", "init_memory", "init_table", "LIKELY", "MEMCHECK", "Memory",
-  "register_func_type", "REM_U", "ROTL", "ROTR", "s16", "s32", "s64", "s8",
-  "Table", "trap", "Trap", "TRAP", "TRAP_CALL_INDIRECT", "TRAP_DIV_BY_ZERO",
-  "TRAP_EXHAUSTION", "TRAP_INT_OVERFLOW", "TRAP_INVALID_CONVERSION",
-  "TRAP_NONE", "TRAP_OOB", "TRAP_UNREACHABLE", "TRUNC_S", "TRUNC_U", "Type",
+  "init_globals", "init_memory", "init_table", "LIKELY", "MEMCHECK", "wasm_rt_memory_t",
+  "wasm_rt_register_func_type", "REM_U", "ROTL", "ROTR", "s16", "s32", "s64", "s8",
+  "wasm_rt_table_t", "wasm_rt_trap", "Trap", "TRAP", "WASM_RT_TRAP_CALL_INDIRECT", "WASM_RT_TRAP_DIV_BY_ZERO",
+  "WASM_RT_TRAP_EXHAUSTION", "WASM_RT_TRAP_INT_OVERFLOW", "WASM_RT_TRAP_INVALID_CONVERSION",
+  "WASM_RT_TRAP_NONE", "WASM_RT_TRAP_OOB", "WASM_RT_TRAP_UNREACHABLE", "TRUNC_S", "TRUNC_U", "Type",
   "u16", "u32", "u64", "u8", "UNLIKELY", "UNREACHABLE",
 
   // TODO(binji): sort and pack above.
-  "DIV_S", "REM_S", "ADD_PREFIX", "MODULE_PREFIX", "grow_memory",
+  "DIV_S", "REM_S", "WASM_RT_ADD_PREFIX", "MODULE_PREFIX", "wasm_rt_grow_memory",
 };
 
 static const char s_header_top[] =
     R"(
-#ifndef WASM_RUNTIME_INCLUDED__
-#define WASM_RUNTIME_INCLUDED__
+#ifndef WASM_RT_INCLUDED__
+#define WASM_RT_INCLUDED__
 
 #include <stdint.h>
-#include <stdlib.h>
 
+#ifndef WASM_RT_MODULE_PREFIX
+#define WASM_RT_MODULE_PREFIX
+#endif
+
+#define WASM_RT_PASTE_(x, y) x ## y
+#define WASM_RT_PASTE(x, y) WASM_RT_PASTE_(x, y)
+#define WASM_RT_ADD_PREFIX(x) WASM_RT_PASTE(WASM_RT_MODULE_PREFIX, x)
+
+/* TODO(binji): only use stdint.h types in header */
 typedef uint8_t u8;
 typedef int8_t s8;
 typedef uint16_t u16;
@@ -384,33 +392,51 @@ typedef int64_t s64;
 typedef float f32;
 typedef double f64;
 
-#ifndef MODULE_PREFIX
-#define MODULE_PREFIX
-#endif
+typedef enum {
+  WASM_RT_TRAP_NONE,
+  WASM_RT_TRAP_OOB,
+  WASM_RT_TRAP_INT_OVERFLOW,
+  WASM_RT_TRAP_DIV_BY_ZERO,
+  WASM_RT_TRAP_INVALID_CONVERSION,
+  WASM_RT_TRAP_UNREACHABLE,
+  WASM_RT_TRAP_CALL_INDIRECT,
+  WASM_RT_TRAP_EXHAUSTION,
+} wasm_rt_trap_t;
 
-#define PASTE_(x, y) x ## y
-#define PASTE(x, y) PASTE_(x, y)
-#define ADD_PREFIX(x) PASTE(MODULE_PREFIX, x)
+typedef enum {
+  WASM_RT_I32,
+  WASM_RT_I64,
+  WASM_RT_F32,
+  WASM_RT_F64,
+} wasm_rt_type_t;
 
-typedef enum Trap {
-  TRAP_NONE, TRAP_OOB, TRAP_INT_OVERFLOW, TRAP_DIV_BY_ZERO,
-  TRAP_INVALID_CONVERSION, TRAP_UNREACHABLE, TRAP_CALL_INDIRECT,
-  TRAP_EXHAUSTION } Trap;
-typedef enum Type { I32, I64, F32, F64 } Type;
-typedef void (*Anyfunc)();
-typedef struct Elem { u32 func_type; Anyfunc func; } Elem;
-typedef struct Memory { u8* data; size_t pages, max_pages, size; } Memory;
-typedef struct Table { Elem* data; size_t size; } Table;
+typedef void (*wasm_rt_anyfunc_t)();
 
-extern void trap(Trap) __attribute__((noreturn));
-extern u32 register_func_type(u32 params, u32 results, ...);
-extern void allocate_memory(Memory*, u32 initial_pages, u32 max_pages);
-extern u32 grow_memory(Memory*, u32 pages);
-extern void allocate_table(Table*, u32 elements);
+typedef struct {
+  uint32_t func_type;
+  wasm_rt_anyfunc_t func;
+} wasm_rt_elem_t;
 
-#endif  /* WASM_RUNTIME_INCLUDED__ */
+typedef struct {
+  uint8_t* data;
+  uint32_t pages, max_pages;
+  uint32_t size;
+} wasm_rt_memory_t;
 
-extern void ADD_PREFIX(init)(void);
+typedef struct {
+  wasm_rt_elem_t* data;
+  uint32_t size;
+} wasm_rt_table_t;
+
+extern void wasm_rt_trap(wasm_rt_trap_t) __attribute__((noreturn));
+extern uint32_t wasm_rt_register_func_type(uint32_t params, uint32_t results, ...);
+extern void wasm_rt_allocate_memory(wasm_rt_memory_t*, uint32_t initial_pages, uint32_t max_pages);
+extern uint32_t wasm_rt_grow_memory(wasm_rt_memory_t*, uint32_t pages);
+extern void wasm_rt_allocate_table(wasm_rt_table_t*, uint32_t elements);
+
+#endif  /* WASM_RT_INCLUDED__ */
+
+extern void WASM_RT_ADD_PREFIX(init)(void);
 )";
 
 static const char s_source_includes[] = R"(#include <assert.h>
@@ -420,17 +446,17 @@ static const char s_source_includes[] = R"(#include <assert.h>
 )";
 
 static const char s_source_declarations[] = R"(
-void ADD_PREFIX(init)(void);
+void WASM_RT_ADD_PREFIX(init)(void);
 
 #define UNLIKELY(x) __builtin_expect(!!(x), 0)
 #define LIKELY(x) __builtin_expect(!!(x), 1)
 
 #define EXPORT_FUNC(decl, name) decl __attribute__((alias(#name)))
 #define EXPORT_GLOBAL(decl, name) extern decl __attribute__((alias(#name)))
-#define EXPORT_MEMORY(sym, name) extern Memory sym __attribute__((alias(#name)))
-#define EXPORT_TABLE(sym, name) extern Table sym __attribute__((alias(#name)))
+#define EXPORT_MEMORY(sym, name) extern wasm_rt_memory_t sym __attribute__((alias(#name)))
+#define EXPORT_TABLE(sym, name) extern wasm_rt_table_t sym __attribute__((alias(#name)))
 
-#define TRAP(x) (trap(TRAP_##x), 0)
+#define TRAP(x) (wasm_rt_trap(WASM_RT_TRAP_##x), 0)
 
 #define UNREACHABLE TRAP(UNREACHABLE)
 
@@ -444,7 +470,7 @@ void ADD_PREFIX(init)(void);
   if (UNLIKELY((a) + sizeof(t) > mem->size)) TRAP(OOB)
 
 #define DEFINE_LOAD(name, t1, t2, t3)              \
-  static inline t3 name(Memory* mem, u64 addr) {   \
+  static inline t3 name(wasm_rt_memory_t* mem, u64 addr) {   \
     MEMCHECK(mem, addr, t1);                       \
     t1 result;                                     \
     memcpy(&result, &mem->data[addr], sizeof(t1)); \
@@ -452,7 +478,7 @@ void ADD_PREFIX(init)(void);
   }
 
 #define DEFINE_STORE(name, t1, t2)                           \
-  static inline void name(Memory* mem, u64 addr, t2 value) { \
+  static inline void name(wasm_rt_memory_t* mem, u64 addr, t2 value) { \
     MEMCHECK(mem, addr, t1);                                 \
     t1 wrapped = (t1)value;                                  \
     memcpy(&mem->data[addr], &wrapped, sizeof(t1));          \
@@ -654,7 +680,7 @@ std::string CWriter::MangleName(string_view module, string_view field) {
 }
 
 std::string CWriter::MangleNameWithModulePrefix(string_view name) {
-  return "ADD_PREFIX(" + MangleName(name) + ")";
+  return "WASM_RT_ADD_PREFIX(" + MangleName(name) + ")";
 }
 
 std::string CWriter::LegalizeName(string_view name) {
@@ -870,10 +896,10 @@ void CWriter::Write(Type type) {
 
 void CWriter::Write(TypeEnum type) {
   switch (type.type) {
-    case Type::I32: Write("I32"); break;
-    case Type::I64: Write("I64"); break;
-    case Type::F32: Write("F32"); break;
-    case Type::F64: Write("F64"); break;
+    case Type::I32: Write("WASM_RT_I32"); break;
+    case Type::I64: Write("WASM_RT_I64"); break;
+    case Type::F32: Write("WASM_RT_F32"); break;
+    case Type::F64: Write("WASM_RT_F64"); break;
     default:
       WABT_UNREACHABLE;
   }
@@ -1008,7 +1034,7 @@ void CWriter::WriteFuncTypes() {
   for (FuncType* func_type : module_->func_types) {
     Index num_params = func_type->GetNumParams();
     Index num_results = func_type->GetNumResults();
-    Write("  func_types[", func_type_index, "] = register_func_type(",
+    Write("  func_types[", func_type_index, "] = wasm_rt_register_func_type(",
           num_params, ", ", num_results);
     for (Index i = 0; i < num_params; ++i)
       Write(", ", TypeEnum(func_type->GetParamType(i)));
@@ -1156,7 +1182,7 @@ void CWriter::WriteMemories() {
 }
 
 void CWriter::WriteMemory(const Memory& memory, const std::string& name) {
-  Write("Memory ", name, ";");
+  Write("wasm_rt_memory_t ", name, ";");
 }
 
 void CWriter::WriteTables() {
@@ -1178,7 +1204,7 @@ void CWriter::WriteTables() {
 }
 
 void CWriter::WriteTable(const Table& table, const std::string& name) {
-  Write("Table ", name, ";", Newline());
+  Write("wasm_rt_table_t ", name, ";", Newline());
 }
 
 void CWriter::WriteDataInitializers() {
@@ -1194,9 +1220,9 @@ void CWriter::WriteDataInitializers() {
               data_segment_index, "[] = ", OpenBrace());
         size_t i = 0;
         for (uint8_t x : data_segment->data) {
+          Writef("0x%02x, ", x);
           if ((++i % 12) == 0)
             Write(Newline());
-          Writef("0x%02x, ", x);
         }
         if (i > 0)
           Write(Newline());
@@ -1212,7 +1238,7 @@ void CWriter::WriteDataInitializers() {
   if (memory) {
     uint32_t max =
         memory->page_limits.has_max ? memory->page_limits.max : UINT32_MAX;
-    Write("allocate_memory(&", GlobalName(memory->name), ", ",
+    Write("wasm_rt_allocate_memory(&", GlobalName(memory->name), ", ",
           memory->page_limits.initial, ", ", max, ");", Newline());
   }
   data_segment_index = 0;
@@ -1233,7 +1259,7 @@ void CWriter::WriteElemInitializers() {
 
   if (!module_->tables.empty()) {
     for (const ElemSegment* elem_segment : module_->elem_segments) {
-      Write(Newline(), "static const Elem elem_segment_data_",
+      Write(Newline(), "static const wasm_rt_elem_t elem_segment_data_",
             elem_segment_index, "[] = ", OpenBrace());
 
       size_t i = 0;
@@ -1244,7 +1270,7 @@ void CWriter::WriteElemInitializers() {
         const Func* func = module_->GetFunc(var);
         Index func_type_index = module_->GetFuncTypeIndex(func->decl.type_var);
 
-        Write("{", func_type_index, ", (Anyfunc)", GlobalName(func->name),
+        Write("{", func_type_index, ", (wasm_rt_anyfunc_t)", GlobalName(func->name),
               "}, ");
       }
       if (i > 0)
@@ -1258,7 +1284,7 @@ void CWriter::WriteElemInitializers() {
 
   Write(Newline(), "static void init_table(void) ", OpenBrace());
   if (table) {
-    Write("allocate_table(&", GlobalName(table->name), ", ",
+    Write("wasm_rt_allocate_table(&", GlobalName(table->name), ", ",
           table->elem_limits.initial, ");", Newline());
   }
   elem_segment_index = 0;
@@ -1266,7 +1292,7 @@ void CWriter::WriteElemInitializers() {
     Write("memcpy(&", GlobalName(table->name), ".data[");
     WriteInitExpr(elem_segment->offset);
     Write("], elem_segment_data_", elem_segment_index, ", ",
-          elem_segment->vars.size(), " * sizeof(Elem));", Newline());
+          elem_segment->vars.size(), " * sizeof(wasm_rt_elem_t));", Newline());
     ++elem_segment_index;
   }
 
@@ -1274,7 +1300,7 @@ void CWriter::WriteElemInitializers() {
 }
 
 void CWriter::WriteInit() {
-  Write(Newline(), "void ADD_PREFIX(init)(void) ", OpenBrace());
+  Write(Newline(), "void WASM_RT_ADD_PREFIX(init)(void) ", OpenBrace());
   Write("init_func_types();", Newline());
   Write("init_globals();", Newline());
   Write("init_memory();", Newline());
@@ -1663,7 +1689,7 @@ void CWriter::Write(const ExprList& exprs) {
         assert(module_->memories.size() == 1);
         Memory* memory = module_->memories[0];
 
-        Write(StackVar(0), " = grow_memory(&", GlobalName(memory->name), ", ",
+        Write(StackVar(0), " = wasm_rt_grow_memory(&", GlobalName(memory->name), ", ",
               StackVar(0), ");", Newline());
         break;
       }

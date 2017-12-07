@@ -150,9 +150,9 @@ class CWriter(object):
       if command['type'] == 'module':
         header = os.path.splitext(command['filename'])[0] + '.h'
         self.out_file.write(
-            '#define MODULE_PREFIX %s\n' % self._ModuleIdxName(idx))
+            '#define WASM_RT_MODULE_PREFIX %s\n' % self._ModuleIdxName(idx))
         self.out_file.write("#include \"%s\"\n" % header)
-        self.out_file.write('#undef MODULE_PREFIX\n\n')
+        self.out_file.write('#undef WASM_RT_MODULE_PREFIX\n\n')
         idx += 1
 
   def _WriteCommand(self, command):
@@ -365,7 +365,7 @@ def main(args):
       o_filenames.append(o_filename)
       wasm2c.RunWithArgs(wasm_filename, '-o', c_filename, cwd=out_dir)
       cc.RunWithArgs('-c', '-o', o_filename,
-                     '-DMODULE_PREFIX=%s' % ModuleIdxName(i),
+                     '-DWASM_RT_MODULE_PREFIX=%s' % ModuleIdxName(i),
                      c_filename, cwd=out_dir)
       i += 1
 

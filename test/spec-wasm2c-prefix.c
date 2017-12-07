@@ -13,17 +13,17 @@
 #define PAGE_SIZE 65536
 
 typedef struct FuncType {
-  Type* params;
-  Type* results;
-  size_t param_count;
-  size_t result_count;
+  wasm_rt_type_t* params;
+  wasm_rt_type_t* results;
+  u32 param_count;
+  u32 result_count;
 } FuncType;
 
 int g_tests_run;
 int g_tests_passed;
 jmp_buf g_jmp_buf;
 FuncType* g_func_types;
-size_t g_func_type_count;
+u32 g_func_type_count;
 
 void run_spec_tests(void);
 
@@ -54,7 +54,7 @@ void error(const char* file, int line, const char* format, ...) {
         (void)(f);                                                \
         error(__FILE__, __LINE__, "expected " #f " to trap.\n");  \
         break;                                                    \
-      case TRAP_EXHAUSTION:                                       \
+      case WASM_RT_TRAP_EXHAUSTION:                               \
         g_tests_passed++;                                         \
         break;                                                    \
       default:                                                    \
@@ -177,8 +177,8 @@ static bool is_arithmetic_nan_f64(u64 x) {
   return (x & 0x7ff8000000000000) == 0x7ff8000000000000;
 }
 
-void trap(Trap code) {
-  assert(code != TRAP_NONE);
+void wasm_rt_trap(wasm_rt_trap_t code) {
+  assert(code != WASM_RT_TRAP_NONE);
   longjmp(g_jmp_buf, code);
 }
 
@@ -195,21 +195,21 @@ static bool func_types_are_equal(FuncType* a, FuncType* b) {
   return 1;
 }
 
-u32 register_func_type(u32 param_count, u32 result_count, ...) {
+u32 wasm_rt_register_func_type(u32 param_count, u32 result_count, ...) {
   FuncType func_type;
   func_type.param_count = param_count;
-  func_type.params = malloc(param_count * sizeof(Type));
+  func_type.params = malloc(param_count * sizeof(wasm_rt_type_t));
   func_type.result_count = result_count;
-  func_type.results = malloc(result_count * sizeof(Type));
+  func_type.results = malloc(result_count * sizeof(wasm_rt_type_t));
 
   va_list args;
   va_start(args, result_count);
 
   u32 i;
   for (i = 0; i < param_count; ++i)
-    func_type.params[i] = va_arg(args, Type);
+    func_type.params[i] = va_arg(args, wasm_rt_type_t);
   for (i = 0; i < result_count; ++i)
-    func_type.results[i] = va_arg(args, Type);
+    func_type.results[i] = va_arg(args, wasm_rt_type_t);
   va_end(args);
 
   for (i = 0; i < g_func_type_count; ++i) {
@@ -226,14 +226,16 @@ u32 register_func_type(u32 param_count, u32 result_count, ...) {
   return idx + 1;
 }
 
-void allocate_memory(Memory* memory, u32 initial_pages, u32 max_pages) {
+void wasm_rt_allocate_memory(wasm_rt_memory_t* memory,
+                             u32 initial_pages,
+                             u32 max_pages) {
   memory->pages = initial_pages;
   memory->max_pages = max_pages;
   memory->size = initial_pages * PAGE_SIZE;
   memory->data = calloc(memory->size, 1);
 }
 
-u32 grow_memory(Memory* memory, u32 delta) {
+u32 wasm_rt_grow_memory(wasm_rt_memory_t* memory, u32 delta) {
   u32 old_pages = memory->pages;
   u32 new_pages = memory->pages + delta;
   if (new_pages < old_pages || new_pages > memory->max_pages) {
@@ -245,9 +247,9 @@ u32 grow_memory(Memory* memory, u32 delta) {
   return old_pages;
 }
 
-void allocate_table(Table* table, u32 elements) {
+void wasm_rt_allocate_table(wasm_rt_table_t* table, u32 elements) {
   table->size = elements;
-  table->data = calloc(table->size, sizeof(Elem));
+  table->data = calloc(table->size, sizeof(wasm_rt_elem_t));
 }
 
 int main(int argc, char** argv) {
