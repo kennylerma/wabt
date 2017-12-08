@@ -247,12 +247,29 @@ u32 wasm_rt_grow_memory(wasm_rt_memory_t* memory, u32 delta) {
   return old_pages;
 }
 
-void wasm_rt_allocate_table(wasm_rt_table_t* table, u32 elements) {
+void wasm_rt_allocate_table(wasm_rt_table_t* table,
+                            u32 elements,
+                            u32 max_elements) {
   table->size = elements;
+  table->max_size = max_elements;
   table->data = calloc(table->size, sizeof(wasm_rt_elem_t));
 }
 
+wasm_rt_table_t Z_spectestZ_table;
+wasm_rt_memory_t Z_spectestZ_memory;
+
+static void init_spectest_module(void) {
+  // global->typed_value.value.i32 = 666;
+  // float value = 666.6f;
+  // global->typed_value.value.i64 = 666;
+  // double value = 666.6;
+
+  wasm_rt_allocate_memory(&Z_spectestZ_memory, 10, 20);
+  wasm_rt_allocate_table(&Z_spectestZ_table, 1, 2);
+}
+
 int main(int argc, char** argv) {
+  init_spectest_module();
   run_spec_tests();
   printf("%u/%u tests passed.\n", g_tests_passed, g_tests_run);
   return g_tests_passed != g_tests_run;

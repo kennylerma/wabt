@@ -425,6 +425,7 @@ typedef struct {
 
 typedef struct {
   wasm_rt_elem_t* data;
+  uint32_t max_size;
   uint32_t size;
 } wasm_rt_table_t;
 
@@ -432,7 +433,7 @@ extern void wasm_rt_trap(wasm_rt_trap_t) __attribute__((noreturn));
 extern uint32_t wasm_rt_register_func_type(uint32_t params, uint32_t results, ...);
 extern void wasm_rt_allocate_memory(wasm_rt_memory_t*, uint32_t initial_pages, uint32_t max_pages);
 extern uint32_t wasm_rt_grow_memory(wasm_rt_memory_t*, uint32_t pages);
-extern void wasm_rt_allocate_table(wasm_rt_table_t*, uint32_t elements);
+extern void wasm_rt_allocate_table(wasm_rt_table_t*, uint32_t elements, uint32_t max_elements);
 
 #endif  /* WASM_RT_INCLUDED__ */
 
@@ -1270,8 +1271,8 @@ void CWriter::WriteElemInitializers() {
         const Func* func = module_->GetFunc(var);
         Index func_type_index = module_->GetFuncTypeIndex(func->decl.type_var);
 
-        Write("{", func_type_index, ", (wasm_rt_anyfunc_t)", GlobalName(func->name),
-              "}, ");
+        Write("{", func_type_index, ", (wasm_rt_anyfunc_t)",
+              GlobalName(func->name), "}, ");
       }
       if (i > 0)
         Write(Newline());
@@ -1284,8 +1285,10 @@ void CWriter::WriteElemInitializers() {
 
   Write(Newline(), "static void init_table(void) ", OpenBrace());
   if (table) {
+    uint32_t max =
+        table->elem_limits.has_max ? table->elem_limits.max : UINT32_MAX;
     Write("wasm_rt_allocate_table(&", GlobalName(table->name), ", ",
-          table->elem_limits.initial, ");", Newline());
+          table->elem_limits.initial, ", ", max, ");", Newline());
   }
   elem_segment_index = 0;
   for (const ElemSegment* elem_segment : module_->elem_segments) {
@@ -1689,8 +1692,8 @@ void CWriter::Write(const ExprList& exprs) {
         assert(module_->memories.size() == 1);
         Memory* memory = module_->memories[0];
 
-        Write(StackVar(0), " = wasm_rt_grow_memory(&", GlobalName(memory->name), ", ",
-              StackVar(0), ");", Newline());
+        Write(StackVar(0), " = wasm_rt_grow_memory(&", GlobalName(memory->name),
+              ", ", StackVar(0), ");", Newline());
         break;
       }
 
