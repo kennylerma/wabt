@@ -1238,7 +1238,7 @@ void CWriter::WriteDataInitializers() {
   Write(Newline(), "static void init_memory(void) ", OpenBrace());
   if (memory) {
     uint32_t max =
-        memory->page_limits.has_max ? memory->page_limits.max : UINT32_MAX;
+        memory->page_limits.has_max ? memory->page_limits.max : 65536;
     Write("wasm_rt_allocate_memory(&", GlobalName(memory->name), ", ",
           memory->page_limits.initial, ", ", max, ");", Newline());
   }
@@ -1665,7 +1665,7 @@ void CWriter::Write(const ExprList& exprs) {
         Memory* memory = module_->memories[0];
 
         PushType(Type::I32);
-        Write(StackVar(0), " = ", GlobalName(memory->name), ".size;",
+        Write(StackVar(0), " = ", GlobalName(memory->name), ".pages;",
               Newline());
         break;
       }
