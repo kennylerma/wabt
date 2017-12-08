@@ -1562,7 +1562,7 @@ void CWriter::Write(const ExprList& exprs) {
         Write("if (", StackVar(0), ") ");
         DropTypes(1);
         if (label->HasValue()) {
-          Write("{", CopyLabelVar(*label), " goto ", var, ";}", Newline());
+          Write("{", CopyLabelVar(*label), GotoLabel(var), ";}", Newline());
         } else {
           Write(GotoLabel(var), Newline());
         }
