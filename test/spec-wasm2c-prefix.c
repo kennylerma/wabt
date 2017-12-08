@@ -46,23 +46,25 @@ void error(const char* file, int line, const char* format, ...) {
     }                                                          \
   } while (0)
 
-#define ASSERT_EXHAUSTION(f)                                      \
-  do {                                                            \
-    g_tests_run++;                                                \
-    switch (setjmp(g_jmp_buf)) {                                  \
-      case 0:                                                     \
-        (void)(f);                                                \
-        error(__FILE__, __LINE__, "expected " #f " to trap.\n");  \
-        break;                                                    \
-      case WASM_RT_TRAP_EXHAUSTION:                               \
-        g_tests_passed++;                                         \
-        break;                                                    \
-      default:                                                    \
-        error(__FILE__, __LINE__,                                 \
-              "expected " #f                                      \
-              " to trap due to exhaustion, got trap code %d.\n"); \
-        break;                                                    \
-    }                                                             \
+#define ASSERT_EXHAUSTION(f)                                     \
+  do {                                                           \
+    g_tests_run++;                                               \
+    wasm_rt_trap_t code = setjmp(g_jmp_buf);                     \
+    switch (code) {                                              \
+      case WASM_RT_TRAP_NONE:                                    \
+        (void)(f);                                               \
+        error(__FILE__, __LINE__, "expected " #f " to trap.\n"); \
+        break;                                                   \
+      case WASM_RT_TRAP_EXHAUSTION:                              \
+        g_tests_passed++;                                        \
+        break;                                                   \
+      default:                                                   \
+        error(__FILE__, __LINE__,                                \
+              "expected " #f                                     \
+              " to trap due to exhaustion, got trap code %d.\n", \
+              code);                                             \
+        break;                                                   \
+    }                                                            \
   } while (0)
 
 #define ASSERT_RETURN(f)                           \
@@ -255,6 +257,7 @@ void wasm_rt_allocate_table(wasm_rt_table_t* table,
   table->data = calloc(table->size, sizeof(wasm_rt_elem_t));
 }
 
+uint32_t wasm_rt_call_stack_depth;
 wasm_rt_table_t Z_spectestZ_table;
 wasm_rt_memory_t Z_spectestZ_memory;
 

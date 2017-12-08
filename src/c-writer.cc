@@ -366,6 +366,10 @@ static const char s_header_top[] =
 
 #include <stdint.h>
 
+#ifndef WASM_RT_MAX_CALL_STACK_DEPTH
+#define WASM_RT_MAX_CALL_STACK_DEPTH 100
+#endif
+
 #ifndef WASM_RT_MODULE_PREFIX
 #define WASM_RT_MODULE_PREFIX
 #endif
@@ -428,6 +432,7 @@ extern uint32_t wasm_rt_register_func_type(uint32_t params, uint32_t results, ..
 extern void wasm_rt_allocate_memory(wasm_rt_memory_t*, uint32_t initial_pages, uint32_t max_pages);
 extern uint32_t wasm_rt_grow_memory(wasm_rt_memory_t*, uint32_t pages);
 extern void wasm_rt_allocate_table(wasm_rt_table_t*, uint32_t elements, uint32_t max_elements);
+extern uint32_t wasm_rt_call_stack_depth;
 
 #endif  /* WASM_RT_INCLUDED__ */
 
@@ -450,6 +455,12 @@ static const char s_source_declarations[] = R"(
 #define EXPORT_TABLE(sym, name) extern wasm_rt_table_t sym __attribute__((alias(#name)))
 
 #define TRAP(x) (wasm_rt_trap(WASM_RT_TRAP_##x), 0)
+
+#define FUNC_PROLOGUE                                            \
+  if (++wasm_rt_call_stack_depth > WASM_RT_MAX_CALL_STACK_DEPTH) \
+    TRAP(EXHAUSTION)
+
+#define FUNC_EPILOGUE --wasm_rt_call_stack_depth
 
 #define UNREACHABLE TRAP(UNREACHABLE)
 
@@ -1410,6 +1421,7 @@ void CWriter::Write(const Func& func) {
   // TODO(binji): Add stack check?
   WriteParams();
   WriteLocals();
+  Write("FUNC_PROLOGUE;", Newline());
 
   stream_ = &func_stream_;
   stream_->ClearOffset();
@@ -1422,6 +1434,7 @@ void CWriter::Write(const Func& func) {
   PopLabel();
   ResetTypeStack(0);
   PushTypes(func.decl.sig.result_types);
+  Write("FUNC_EPILOGUE;", Newline());
 
   if (!func.decl.sig.result_types.empty()) {
     // Return the top of the stack implicitly.

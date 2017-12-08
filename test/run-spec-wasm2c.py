@@ -278,16 +278,12 @@ class CWriter(object):
 
 # NOTE: still broken
 #
-# * call_indirect -- stack overflow
-# * call          -- stack overflow
 # * elem          -- module name registering is broken
-# * fac           -- stack overflow
 # * func_ptrs     -- need spectest.print
 # * imports       -- need overloaded spectest.print
 # * linking       -- module name registering is broken
 # * memory        -- need spectest.global
 # * names         -- weird names??
-# * skip-stack-guard-page -- stack overflow?
 # * start         -- need spectest.print
 
 
