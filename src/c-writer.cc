@@ -361,8 +361,12 @@ static const char* s_global_symbols[] = {
 
 static const char s_header_top[] =
     R"(
-#ifndef WASM_RT_INCLUDED__
-#define WASM_RT_INCLUDED__
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#ifndef WASM_RT_INCLUDED_
+#define WASM_RT_INCLUDED_
 
 #include <stdint.h>
 
@@ -408,7 +412,7 @@ typedef enum {
   WASM_RT_F64,
 } wasm_rt_type_t;
 
-typedef void (*wasm_rt_anyfunc_t)();
+typedef void (*wasm_rt_anyfunc_t)(void);
 
 typedef struct {
   uint32_t func_type;
@@ -434,9 +438,15 @@ extern uint32_t wasm_rt_grow_memory(wasm_rt_memory_t*, uint32_t pages);
 extern void wasm_rt_allocate_table(wasm_rt_table_t*, uint32_t elements, uint32_t max_elements);
 extern uint32_t wasm_rt_call_stack_depth;
 
-#endif  /* WASM_RT_INCLUDED__ */
+#endif  /* WASM_RT_INCLUDED_ */
 
 extern void WASM_RT_ADD_PREFIX(init)(void);
+)";
+
+static const char s_header_bottom[] = R"(
+#ifdef __cplusplus
+}
+#endif
 )";
 
 static const char s_source_includes[] = R"(#include <assert.h>
@@ -2310,6 +2320,7 @@ void CWriter::WriteCHeader() {
   Write(s_header_top);
   WriteImports();
   WriteHeaderExports();
+  Write(s_header_bottom);
   Write(Newline(), "#endif  /* ", guard, " */", Newline());
 }
 
