@@ -33,59 +33,52 @@ from utils import Error
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-F32_INF = 0x7f800000
-F32_NEG_INF = 0xff800000
-F32_NEG_ZERO = 0x80000000
-F64_INF = 0x7ff0000000000000
-F64_NEG_INF = 0xfff0000000000000
-F64_NEG_ZERO = 0x8000000000000000
-
-
-def I32ToC(value):
-  return '%su' % value
-
-
-def I64ToC(value):
-  return '%sull' % value
-
-
-def IsNaNF32(f32_bits):
-  return (F32_INF < f32_bits < F32_NEG_ZERO) or (f32_bits > F32_NEG_INF)
-
-
-def IsNaNF64(f64_bits):
-  return (F64_INF < f64_bits < F64_NEG_ZERO) or (f64_bits > F64_NEG_INF)
-
 
 def ReinterpretF32(f32_bits):
   return struct.unpack('<f', struct.pack('<I', f32_bits))[0]
+
+def F32ToC(f32_bits):
+  F32_SIGN_BIT = 0x80000000
+  F32_INF = 0x7f800000
+  F32_SIG_MASK = 0x7fffff
+
+  if (f32_bits & F32_INF) == F32_INF:
+    sign = '-' if (f32_bits & F32_SIGN_BIT) == F32_SIGN_BIT else ''
+    # NaN or infinity
+    if f32_bits & F32_SIG_MASK:
+      # NaN
+      return '%smake_nan_f32(0x%06x)' % (sign, f32_bits & F32_SIG_MASK)
+    else:
+      return '%sINFINITY' % sign
+  elif f32_bits == F32_SIGN_BIT:
+    return '-0.f'
+  else:
+    s = '%.9g' % ReinterpretF32(f32_bits)
+    if '.' not in s:
+      s += '.'
+    return s + 'f'
 
 
 def ReinterpretF64(f64_bits):
   return struct.unpack('<d', struct.pack('<Q', f64_bits))[0]
 
-
-def F32ToC(f32_bits):
-  if f32_bits == F32_INF:
-    return 'INFINITY'
-  elif f32_bits == F32_NEG_INF:
-    return '-INFINITY'
-  elif IsNaNF32(f32_bits):
-    return 'make_nan_f32(0x%08x)' % f32_bits
-  else:
-    return '%sf' % repr(ReinterpretF32(f32_bits))
-
-
 def F64ToC(f64_bits):
-  if f64_bits == F64_INF:
-    return 'INFINITY'
-  elif f64_bits == F64_NEG_INF:
-    return '-INFINITY'
-  elif IsNaNF64(f64_bits):
-    return 'make_nan_f64(0x%016x)' % f64_bits
+  F64_SIGN_BIT = 0x8000000000000000
+  F64_INF = 0x7ff0000000000000
+  F64_SIG_MASK = 0xfffffffffffff
+
+  if (f64_bits & F64_INF) == F64_INF:
+    sign = '-' if (f64_bits & F64_SIGN_BIT) == F64_SIGN_BIT else ''
+    # NaN or infinity
+    if f64_bits & F64_SIG_MASK:
+      # NaN
+      return '%smake_nan_f64(0x%06x)' % (sign, f64_bits & F64_SIG_MASK)
+    else:
+      return '%sINFINITY' % sign
+  elif f64_bits == F64_SIGN_BIT:
+    return '-0.0'
   else:
-    # Use repr to get full precision
-    return repr(ReinterpretF64(f64_bits))
+    return '%.17g' % ReinterpretF64(f64_bits)
 
 
 def MangleName(module_name, s):
@@ -246,9 +239,9 @@ class CWriter(object):
     type_ = const['type']
     value = int(const['value'])
     if type_ == 'i32':
-      return I32ToC(value)
+      return '%su' % value
     elif type_ == 'i64':
-      return I64ToC(value)
+      return '%sull' % value
     elif type_ == 'f32':
       return F32ToC(value)
     elif type_ == 'f64':

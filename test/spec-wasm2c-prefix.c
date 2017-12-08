@@ -152,12 +152,14 @@ static bool is_equal_f64(f64 x, f64 y) {
 }
 
 static f32 make_nan_f32(u32 x) {
+  x |= 0x7f800000;
   f32 res;
   memcpy(&res, &x, sizeof(res));
   return res;
 }
 
 static f64 make_nan_f64(u64 x) {
+  x |= 0x7ff0000000000000;
   f64 res;
   memcpy(&res, &x, sizeof(res));
   return res;
