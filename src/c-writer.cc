@@ -90,11 +90,6 @@ struct StackVar {
   Type type;
 };
 
-struct CopyLabelVar {
-  explicit CopyLabelVar(const Label& label) : label(label) {}
-  const Label& label;
-};
-
 struct TypeEnum {
   explicit TypeEnum(Type type) : type(type) {}
   Type type;
@@ -202,7 +197,6 @@ class CWriter {
   void Write(const LabelDecl&);
   void Write(const GlobalVar&);
   void Write(const StackVar&);
-  void Write(const CopyLabelVar&);
   void Write(const ResultType&);
   void Write(const Const&);
   void WriteInitExpr(const ExprList&);
@@ -447,8 +441,6 @@ static const char s_source_includes[] = R"(#include <assert.h>
 )";
 
 static const char s_source_declarations[] = R"(
-void WASM_RT_ADD_PREFIX(init)(void);
-
 #define UNLIKELY(x) __builtin_expect(!!(x), 0)
 #define LIKELY(x) __builtin_expect(!!(x), 1)
 
@@ -829,9 +821,18 @@ void CWriter::Write(const Var& var) {
   Write(LocalName(var.name()));
 }
 
-void CWriter::Write(const GotoLabel& var) {
-  if (var.var.is_name()) {
-    Write("goto ", var.var, ";");
+void CWriter::Write(const GotoLabel& goto_label) {
+  const Label* label = FindLabel(goto_label.var);
+  if (label->HasValue()) {
+    assert(label->sig.size() == 1);
+    assert(type_stack_.size() >= label->type_stack_size);
+    Index dst = type_stack_.size() - label->type_stack_size - 1;
+    if (dst != 0)
+      Write(StackVar(dst, label->sig[0]), " = ", StackVar(0), "; ");
+  }
+
+  if (goto_label.var.is_name()) {
+    Write("goto ", goto_label.var, ";");
   } else {
     // We've generated names for all labels, so we should only be using an
     // index when branching to the implicit function label, which can't be
@@ -874,14 +875,6 @@ void CWriter::Write(const StackVar& sv) {
   } else {
     Write(iter->second);
   }
-}
-
-void CWriter::Write(const CopyLabelVar& clv) {
-  assert(clv.label.sig.size() == 1);
-  assert(type_stack_.size() >= clv.label.type_stack_size);
-  Write(StackVar(type_stack_.size() - clv.label.type_stack_size - 1,
-                 clv.label.sig[0]),
-        " = ", StackVar(0), ";");
 }
 
 void CWriter::Write(Type type) {
@@ -1546,48 +1539,25 @@ void CWriter::Write(const ExprList& exprs) {
         break;
       }
 
-      case ExprType::Br: {
-        const Var& var = cast<BrExpr>(&expr)->var;
-        const Label* label = FindLabel(var);
-        if (label->HasValue())
-          Write(CopyLabelVar(*label), " ");
-        Write(GotoLabel(var), Newline());
+      case ExprType::Br:
+        Write(GotoLabel(cast<BrExpr>(&expr)->var), Newline());
         // Stop processing this ExprList, since the following are unreachable.
         return;
-      }
 
-      case ExprType::BrIf: {
-        const Var& var = cast<BrIfExpr>(&expr)->var;
-        const Label* label = FindLabel(var);
-        Write("if (", StackVar(0), ") ");
+      case ExprType::BrIf:
+        Write("if (", StackVar(0), ") {");
         DropTypes(1);
-        if (label->HasValue()) {
-          Write("{", CopyLabelVar(*label), GotoLabel(var), ";}", Newline());
-        } else {
-          Write(GotoLabel(var), Newline());
-        }
+        Write(GotoLabel(cast<BrIfExpr>(&expr)->var), "}", Newline());
         break;
-      }
 
       case ExprType::BrTable: {
         const auto* bt_expr = cast<BrTableExpr>(&expr);
         Write("switch (", StackVar(0), ") ", OpenBrace());
         DropTypes(1);
         Index i = 0;
-        const Label* label;
-        for (const Var& var : bt_expr->targets) {
-          label = FindLabel(var);
-          Write("case ", i, ": ");
-          if (label->HasValue())
-            Write(CopyLabelVar(*label), "; ");
-          Write(GotoLabel(var), Newline());
-          ++i;
-        }
-
-        label = FindLabel(bt_expr->default_target);
+        for (const Var& var : bt_expr->targets)
+          Write("case ", i++, ": ", GotoLabel(var), Newline());
         Write("default: ");
-        if (label->HasValue())
-          Write(CopyLabelVar(*label), "; ");
         Write(GotoLabel(bt_expr->default_target), Newline(), CloseBrace(),
               Newline());
         // Stop processing this ExprList, since the following are unreachable.
@@ -1740,10 +1710,10 @@ void CWriter::Write(const ExprList& exprs) {
         break;
 
       case ExprType::Return:
-        Write("return");
-        if (!func_->decl.sig.result_types.empty())
-          Write(" ", StackVar(0));
-        Write(";", Newline());
+        // Goto the function label instead; this way we can do shared function
+        // cleanup code in one place.
+        Write(GotoLabel(Var(label_stack_.size() - 1)), Newline());
+        // Stop processing this ExprList, since the following are unreachable.
         return;
 
       case ExprType::Select: {
