@@ -25,9 +25,9 @@ jmp_buf g_jmp_buf;
 FuncType* g_func_types;
 u32 g_func_type_count;
 
-void run_spec_tests(void);
+static void run_spec_tests(void);
 
-void error(const char* file, int line, const char* format, ...) {
+static void error(const char* file, int line, const char* format, ...) {
   va_list args;
   va_start(args, format);
   fprintf(stderr, "%s:%d: assertion failed: ", file, line);
@@ -260,15 +260,20 @@ void wasm_rt_allocate_table(wasm_rt_table_t* table,
 }
 
 uint32_t wasm_rt_call_stack_depth;
+
 wasm_rt_table_t Z_spectestZ_table;
 wasm_rt_memory_t Z_spectestZ_memory;
+uint32_t Z_spectestZ_globalZ_i = 666;
+
+void Z_spectestZ_printZ_vv(void) {
+  printf("spectest.print()\n");
+}
+
+void Z_spectestZ_printZ_iv(uint32_t i) {
+  printf("spectest.print(%d)\n", i);
+}
 
 static void init_spectest_module(void) {
-  // global->typed_value.value.i32 = 666;
-  // float value = 666.6f;
-  // global->typed_value.value.i64 = 666;
-  // double value = 666.6;
-
   wasm_rt_allocate_memory(&Z_spectestZ_memory, 1, 2);
   wasm_rt_allocate_table(&Z_spectestZ_table, 10, 20);
 }

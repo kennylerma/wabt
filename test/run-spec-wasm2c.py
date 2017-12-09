@@ -148,9 +148,6 @@ class CWriter(object):
 
         self.module_prefix_map[name_idx] = name
 
-    print(self.module_name_to_idx)
-    print(self.module_prefix_map)
-
   def _MaybeWriteDummyModule(self):
     if not any(True for c in self.commands if c['type'] == 'module'):
       # This test doesn't have any valid modules, so just use a dummy instead.
@@ -280,12 +277,9 @@ class CWriter(object):
 
 # NOTE: still broken
 #
-# * func_ptrs     -- need spectest.print
 # * imports       -- need overloaded spectest.print
 # * linking       -- need re-export of imported function
-# * memory        -- need spectest.global
 # * names         -- weird names??
-# * start         -- need spectest.print
 
 
 def main(args):

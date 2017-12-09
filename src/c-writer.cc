@@ -156,12 +156,25 @@ class CWriter {
   bool IsTopLabelUsed() const;
   void PopLabel();
 
-  std::string MangleName(string_view);
-  std::string MangleName(string_view, string_view);
-  std::string MangleNameWithModulePrefix(string_view);
-  std::string LegalizeName(string_view);
+  static char MangleType(Type);
+  static std::string MangleTypes(const TypeVector&);
+  static std::string MangleName(string_view);
+  static std::string MangleNameWithModulePrefix(string_view);
+  static std::string LegalizeName(string_view);
   std::string DefineName(SymbolSet*, string_view);
-  std::string DefineImportName(const std::string&, string_view, string_view);
+  std::string DefineImportName(const std::string& name,
+                               string_view,
+                               string_view,
+                               const std::string& sig = std::string());
+  std::string DefineFuncImportName(const std::string&,
+                                   string_view,
+                                   string_view,
+                                   const TypeVector&,
+                                   const TypeVector&);
+  std::string DefineGlobalImportName(const std::string&,
+                                     string_view,
+                                     string_view,
+                                     Type);
   std::string DefineGlobalName(const std::string&);
   std::string DefineLocalName(const std::string&);
   std::string DefineStackVarName(Index, Type, string_view);
@@ -608,7 +621,7 @@ DEFINE_REINTERPRET(i64_reinterpret_f64, f64, u64)
 static const char s_source_init_elem_segment[] = R"(
 static void init_elem_segment(wasm_rt_table_t* table,
                               uint32_t offset,
-                              wasm_rt_elem_t* elems,
+                              const wasm_rt_elem_t* elems,
                               uint32_t size) {
   uint32_t i;
   for (i = 0; i < size; ++i) {
@@ -685,6 +698,29 @@ void CWriter::PopLabel() {
   label_stack_.pop_back();
 }
 
+// static
+char CWriter::MangleType(Type type) {
+  switch (type) {
+    case Type::I32: return 'i';
+    case Type::I64: return 'j';
+    case Type::F32: return 'f';
+    case Type::F64: return 'd';
+    default: WABT_UNREACHABLE;
+  }
+}
+
+// static
+std::string CWriter::MangleTypes(const TypeVector& types) {
+  if (types.empty())
+    return std::string("v");
+
+  std::string result;
+  for (auto type: types)
+    result += MangleType(type);
+  return result;
+}
+
+// static
 std::string CWriter::MangleName(string_view name) {
   const char kPrefix = 'Z';
   std::string result = "Z_";
@@ -703,14 +739,12 @@ std::string CWriter::MangleName(string_view name) {
   return result;
 }
 
-std::string CWriter::MangleName(string_view module, string_view field) {
-  return MangleName(module) + MangleName(field);
-}
-
+// static
 std::string CWriter::MangleNameWithModulePrefix(string_view name) {
   return "WASM_RT_ADD_PREFIX(" + MangleName(name) + ")";
 }
 
+// static
 std::string CWriter::LegalizeName(string_view name) {
   if (name.empty())
     return "_";
@@ -745,12 +779,30 @@ string_view StripLeadingDollar(string_view name) {
 
 std::string CWriter::DefineImportName(const std::string& name,
                                       string_view module,
-                                      string_view field) {
-  std::string mangled = MangleName(module, field);
-  assert(global_syms_.count(mangled) == 0);
-  global_syms_.insert(mangled);
+                                      string_view field,
+                                      const std::string& sig) {
+  std::string mangled = MangleName(module) + MangleName(field) + sig;
+  if (global_syms_.count(mangled) == 0)
+    global_syms_.insert(mangled);
   global_sym_map_.insert(SymbolMap::value_type(name, mangled));
   return mangled;
+}
+
+std::string CWriter::DefineFuncImportName(const std::string& name,
+                                          string_view module,
+                                          string_view field,
+                                          const TypeVector& param_types,
+                                          const TypeVector& result_types) {
+  std::string sig = MangleTypes(result_types) + MangleTypes(param_types);
+  return DefineImportName(name, module, field, MangleName(sig));
+}
+
+std::string CWriter::DefineGlobalImportName(const std::string& name,
+                                            string_view module,
+                                            string_view field,
+                                            Type type) {
+  std::string sig(1, MangleType(type));
+  return DefineImportName(name, module, field, MangleName(sig));
 }
 
 std::string CWriter::DefineGlobalName(const std::string& name) {
@@ -897,15 +949,7 @@ void CWriter::Write(const StackVar& sv) {
   StackTypePair stp = {index, type};
   auto iter = stack_var_sym_map_.find(stp);
   if (iter == stack_var_sym_map_.end()) {
-    std::string name;
-    switch (type) {
-      case Type::I32: name = 'i'; break;
-      case Type::I64: name = 'j'; break;
-      case Type::F32: name = 'f'; break;
-      case Type::F64: name = 'd'; break;
-      default: WABT_UNREACHABLE;
-    }
-    name += std::to_string(index);
+    std::string name = MangleType(type) + std::to_string(index);
     Write(DefineStackVarName(index, type, name));
   } else {
     Write(iter->second);
@@ -1089,17 +1133,20 @@ void CWriter::WriteImports() {
     switch (import->kind()) {
       case ExternalKind::Func: {
         const Func& func = cast<FuncImport>(import)->func;
-        WriteFuncDeclaration(func.decl,
-                             DefineImportName(func.name, import->module_name,
-                                              import->field_name));
+        WriteFuncDeclaration(
+            func.decl,
+            DefineFuncImportName(func.name, import->module_name,
+                                 import->field_name, func.decl.sig.param_types,
+                                 func.decl.sig.result_types));
         Write(";", Newline());
         break;
       }
 
       case ExternalKind::Global: {
         const Global& global = cast<GlobalImport>(import)->global;
-        WriteGlobal(global, DefineImportName(global.name, import->module_name,
-                                             import->field_name));
+        WriteGlobal(global,
+                    DefineGlobalImportName(global.name, import->module_name,
+                                           import->field_name, global.type));
         Write(";", Newline());
         break;
       }
@@ -1339,7 +1386,7 @@ void CWriter::WriteInit() {
   Write("init_memory();", Newline());
   Write("init_table();", Newline());
   for (Var* var : module_->starts) {
-    Write(GlobalName(module_->GetFunc(*var)->name), ";", Newline());
+    Write(GlobalName(module_->GetFunc(*var)->name), "();", Newline());
   }
   Write(CloseBrace(), Newline());
 }
@@ -2229,10 +2276,10 @@ void CWriter::Write(const StoreExpr& expr) {
   assert(module_->memories.size() == 1);
   Memory* memory = module_->memories[0];
 
-  Write(func, "(&", GlobalName(memory->name), ", ", StackVar(1));
+  Write(func, "(&", GlobalName(memory->name), ", (u64)(", StackVar(1));
   if (expr.offset != 0)
     Write(" + ", expr.offset);
-  Write(", ", StackVar(0), ");", Newline());
+  Write("), ", StackVar(0), ");", Newline());
   DropTypes(2);
 }
 
