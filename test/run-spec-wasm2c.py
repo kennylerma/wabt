@@ -23,6 +23,7 @@ except ImportError:
   from io import StringIO
 import json
 import os
+import re
 import struct
 import subprocess
 import sys
@@ -81,28 +82,14 @@ def F64ToC(f64_bits):
     return '%.17g' % ReinterpretF64(f64_bits)
 
 
-def MangleName(module_name, s):
-  result = module_name + 'Z_'
+def MangleName(s):
+  result = 'Z_'
   for c in s:
     if (c.isalnum() and c != 'Z') or c == '_':
       result += c
     else:
       result += 'Z%02X' % ord(c)
   return result
-
-
-def ModuleIdxName(idx):
-  return 'MOD%d_' % idx
-
-
-# TODO(binji): cleanup
-module_names = {}
-
-def AddModuleByName(name, idx):
-  module_names[name] = idx
-
-def ModuleName(name):
-  return module_names[name]
 
 
 class CWriter(object):
@@ -114,8 +101,11 @@ class CWriter(object):
     self.out_dir = out_dir
     self.prefix = prefix
     self.module_idx = 0
+    self.module_name_to_idx = {}
+    self.module_prefix_map = {}
 
   def Write(self):
+    self._CacheModulePrefixes()
     self._MaybeWriteDummyModule()
     self._WriteIncludes()
     self.out_file.write(self.prefix)
@@ -123,6 +113,43 @@ class CWriter(object):
     for command in self.commands:
       self._WriteCommand(command)
     self.out_file.write("\n}\n")
+
+  def GetModuleFilenames(self):
+    return [c['filename'] for c in self.commands if c['type'] == 'module']
+
+  def GetModulePrefix(self, idx_or_name=None):
+    if idx_or_name is not None:
+      return self.module_prefix_map[idx_or_name]
+    return self.module_prefix_map[self.module_idx - 1]
+
+  def _CacheModulePrefixes(self):
+    idx = 0
+    for command in self.commands:
+      if command['type'] == 'module':
+        name = os.path.basename(command['filename'])
+        name = os.path.splitext(name)[0]
+        name = re.sub(r'[^a-zA-Z0-9_]', '_', name)
+        name = MangleName(name)
+
+        self.module_prefix_map[idx] = name
+
+        if 'name' in command:
+          self.module_name_to_idx[command['name']] = idx
+          self.module_prefix_map[command['name']] = name
+
+        idx += 1
+      elif command['type'] == 'register':
+        name = MangleName(command['as'])
+        if 'name' in command:
+          self.module_prefix_map[command['name']] = name
+          name_idx = self.module_name_to_idx[command['name']]
+        else:
+          name_idx = idx
+
+        self.module_prefix_map[name_idx] = name
+
+    print(self.module_name_to_idx)
+    print(self.module_prefix_map)
 
   def _MaybeWriteDummyModule(self):
     if not any(True for c in self.commands if c['type'] == 'module'):
@@ -138,21 +165,19 @@ class CWriter(object):
     self.out_file.write('// %s:%d\n' % (self.source_filename, command['line']))
 
   def _WriteIncludes(self):
-    idx = 1
-    for command in self.commands:
-      if command['type'] == 'module':
-        header = os.path.splitext(command['filename'])[0] + '.h'
-        self.out_file.write(
-            '#define WASM_RT_MODULE_PREFIX %s\n' % self._ModuleIdxName(idx))
-        self.out_file.write("#include \"%s\"\n" % header)
-        self.out_file.write('#undef WASM_RT_MODULE_PREFIX\n\n')
-        idx += 1
+    idx = 0
+    for filename in self.GetModuleFilenames():
+      header = os.path.splitext(filename)[0] + '.h'
+      self.out_file.write(
+          '#define WASM_RT_MODULE_PREFIX %s\n' % self.GetModulePrefix(idx))
+      self.out_file.write("#include \"%s\"\n" % header)
+      self.out_file.write('#undef WASM_RT_MODULE_PREFIX\n\n')
+      idx += 1
 
   def _WriteCommand(self, command):
     command_funcs = {
         'module': self._WriteModuleCommand,
         'action': self._WriteActionCommand,
-        'register': self._WriteRegisterCommand,
         # 'assert_malformed': None,
         # 'assert_invalid': None,
         # 'assert_unlinkable': None,
@@ -170,23 +195,12 @@ class CWriter(object):
       func(command)
       self.out_file.write('\n')
 
-  def _ModuleIdxName(self, idx=None):
-    idx = idx or self.module_idx
-    return ModuleIdxName(idx)
-
   def _WriteModuleCommand(self, command):
     self.module_idx += 1
-    self.out_file.write('%sinit();\n' % self._ModuleIdxName())
-
-    if 'name' in command:
-      AddModuleByName(command['name'], self.module_idx)
+    self.out_file.write('%sinit();\n' % self.GetModulePrefix())
 
   def _WriteActionCommand(self, command):
     self.out_file.write('%s;\n' % self._Action(command['action']))
-
-  def _WriteRegisterCommand(self, command):
-    # TODO
-    pass
 
   def _WriteAssertReturnCommand(self, command):
     expected = command['expected']
@@ -254,13 +268,8 @@ class CWriter(object):
 
   def _Action(self, action):
     type_ = action['type']
-
-    if 'module' in action:
-      module_name = self._ModuleIdxName(ModuleName(action['module']))
-    else:
-      module_name = self._ModuleIdxName()
-
-    field = MangleName(module_name, action['field'])
+    mangled_module_name = self.GetModulePrefix(action.get('module'))
+    field = mangled_module_name + MangleName(action['field'])
     if type_ == 'invoke':
       return '%s(%s)' % (field, self._ConstantList(action.get('args', [])))
     elif type_ == 'get':
@@ -271,10 +280,9 @@ class CWriter(object):
 
 # NOTE: still broken
 #
-# * elem          -- module name registering is broken
 # * func_ptrs     -- need spectest.print
 # * imports       -- need overloaded spectest.print
-# * linking       -- module name registering is broken
+# * linking       -- need re-export of imported function
 # * memory        -- need spectest.global
 # * names         -- weird names??
 # * start         -- need spectest.print
@@ -326,7 +334,8 @@ def main(args):
         prefix = prefix_file.read() + '\n'
 
     output = StringIO()
-    CWriter(spec_json, prefix, output, out_dir).Write()
+    cwriter = CWriter(spec_json, prefix, output, out_dir)
+    cwriter.Write()
 
     main_filename = utils.ChangeExt(json_file_path,  '-main.c')
     with open(main_filename, 'w') as out_main_file:
@@ -337,21 +346,18 @@ def main(args):
         find_exe.GetWasm2CExecutable(options.bindir),
         error_cmdline=options.error_cmdline)
 
-    module_filenames = [c['filename'] for c in spec_json['commands']
-                        if c['type'] == 'module']
-
     # Compile all .c files to .o files
     cc = utils.Executable(options.cc, *options.cflags)
     o_filenames = []
 
-    i = 1
-    for wasm_filename in module_filenames:
+    i = 0
+    for wasm_filename in cwriter.GetModuleFilenames():
       c_filename = utils.ChangeExt(wasm_filename, '.c')
       o_filename = utils.ChangeExt(wasm_filename, '.o')
       o_filenames.append(o_filename)
       wasm2c.RunWithArgs(wasm_filename, '-o', c_filename, cwd=out_dir)
       cc.RunWithArgs('-c', '-o', o_filename,
-                     '-DWASM_RT_MODULE_PREFIX=%s' % ModuleIdxName(i),
+                     '-DWASM_RT_MODULE_PREFIX=%s' % cwriter.GetModulePrefix(i),
                      c_filename, cwd=out_dir)
       i += 1
 

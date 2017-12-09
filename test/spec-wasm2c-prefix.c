@@ -269,8 +269,8 @@ static void init_spectest_module(void) {
   // global->typed_value.value.i64 = 666;
   // double value = 666.6;
 
-  wasm_rt_allocate_memory(&Z_spectestZ_memory, 10, 20);
-  wasm_rt_allocate_table(&Z_spectestZ_table, 1, 2);
+  wasm_rt_allocate_memory(&Z_spectestZ_memory, 1, 2);
+  wasm_rt_allocate_table(&Z_spectestZ_table, 10, 20);
 }
 
 int main(int argc, char** argv) {

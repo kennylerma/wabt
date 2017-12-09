@@ -474,10 +474,10 @@ static const char s_source_declarations[] = R"(
 
 #define UNREACHABLE TRAP(UNREACHABLE)
 
-#define CALL_INDIRECT(table, t, ft, x, ...)                      \
-  (LIKELY((x) < table.size && table.data[x].func &&               \
-          func_types[table.data[x].func_type] == func_types[ft]) \
-       ? ((t)table.data[x].func)(__VA_ARGS__)                    \
+#define CALL_INDIRECT(table, t, ft, x, ...)          \
+  (LIKELY((x) < table.size && table.data[x].func &&  \
+          table.data[x].func_type == func_types[ft]) \
+       ? ((t)table.data[x].func)(__VA_ARGS__)        \
        : TRAP(CALL_INDIRECT))
 
 #define MEMCHECK(mem, a, t)  \
@@ -603,6 +603,20 @@ DEFINE_REINTERPRET(f32_reinterpret_i32, u32, f32)
 DEFINE_REINTERPRET(i32_reinterpret_f32, f32, u32)
 DEFINE_REINTERPRET(f64_reinterpret_i64, u64, f64)
 DEFINE_REINTERPRET(i64_reinterpret_f64, f64, u64)
+)";
+
+static const char s_source_init_elem_segment[] = R"(
+static void init_elem_segment(wasm_rt_table_t* table,
+                              uint32_t offset,
+                              wasm_rt_elem_t* elems,
+                              uint32_t size) {
+  uint32_t i;
+  for (i = 0; i < size; ++i) {
+    wasm_rt_elem_t* elem = &table->data[offset + i];
+    elem->func_type = func_types[elems[i].func_type];
+    elem->func = elems[i].func;
+  }
+}
 )";
 
 size_t CWriter::MarkTypeStack() const {
@@ -1250,7 +1264,7 @@ void CWriter::WriteDataInitializers() {
   }
 
   Write(Newline(), "static void init_memory(void) ", OpenBrace());
-  if (memory) {
+  if (memory && module_->num_memory_imports == 0) {
     uint32_t max =
         memory->page_limits.has_max ? memory->page_limits.max : 65536;
     Write("wasm_rt_allocate_memory(&", GlobalName(memory->name), ", ",
@@ -1271,6 +1285,8 @@ void CWriter::WriteDataInitializers() {
 void CWriter::WriteElemInitializers() {
   const Table* table = nullptr;
   Index elem_segment_index = 0;
+
+  Write(s_source_init_elem_segment);
 
   if (!module_->tables.empty()) {
     for (const ElemSegment* elem_segment : module_->elem_segments) {
@@ -1298,7 +1314,7 @@ void CWriter::WriteElemInitializers() {
   }
 
   Write(Newline(), "static void init_table(void) ", OpenBrace());
-  if (table) {
+  if (table && module_->num_table_imports == 0) {
     uint32_t max =
         table->elem_limits.has_max ? table->elem_limits.max : UINT32_MAX;
     Write("wasm_rt_allocate_table(&", GlobalName(table->name), ", ",
@@ -1306,10 +1322,10 @@ void CWriter::WriteElemInitializers() {
   }
   elem_segment_index = 0;
   for (const ElemSegment* elem_segment : module_->elem_segments) {
-    Write("memcpy(&", GlobalName(table->name), ".data[");
+    Write("init_elem_segment(&", GlobalName(table->name), ", ");
     WriteInitExpr(elem_segment->offset);
-    Write("], elem_segment_data_", elem_segment_index, ", ",
-          elem_segment->vars.size(), " * sizeof(wasm_rt_elem_t));", Newline());
+    Write(", elem_segment_data_", elem_segment_index, ", ",
+          elem_segment->vars.size(), ");", Newline());
     ++elem_segment_index;
   }
 
