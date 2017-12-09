@@ -105,8 +105,8 @@ class CWriter(object):
     self.module_prefix_map = {}
 
   def Write(self):
-    self._CacheModulePrefixes()
     self._MaybeWriteDummyModule()
+    self._CacheModulePrefixes()
     self._WriteIncludes()
     self.out_file.write(self.prefix)
     self.out_file.write("\nvoid run_spec_tests(void) {\n\n")
@@ -149,7 +149,7 @@ class CWriter(object):
         self.module_prefix_map[name_idx] = name
 
   def _MaybeWriteDummyModule(self):
-    if not any(True for c in self.commands if c['type'] == 'module'):
+    if len(self.GetModuleFilenames()) == 0:
       # This test doesn't have any valid modules, so just use a dummy instead.
       filename = utils.ChangeExt(self.source_filename, '-dummy.wasm')
       with open(os.path.join(self.out_dir, filename), 'wb') as wasm_file:

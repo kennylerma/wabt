@@ -141,6 +141,16 @@ TOOLS = {
         ],
         'VERBOSE-FLAGS': ['--print-cmd', '-v']
     },
+    'run-spec-wasm2c': {
+        'EXE': 'test/run-spec-wasm2c.py',
+        'FLAGS': [
+                '--bindir=%(bindir)s',
+                '--no-error-cmdline',
+                '-o',
+                '%(out_dir)s',
+        ],
+        'VERBOSE-FLAGS': ['--print-cmd', '-v']
+    }
 }
 
 ROUNDTRIP_TOOLS = ('wat2wasm',)

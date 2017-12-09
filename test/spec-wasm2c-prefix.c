@@ -269,7 +269,7 @@ void Z_spectestZ_printZ_vv(void) {
   printf("spectest.print()\n");
 }
 
-void Z_spectestZ_printZ_iv(uint32_t i) {
+void Z_spectestZ_printZ_vi(uint32_t i) {
   printf("spectest.print(%d)\n", i);
 }
 
