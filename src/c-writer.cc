@@ -738,7 +738,7 @@ std::string CWriter::MangleName(string_view name) {
         result += c;
       } else {
         result += kPrefix;
-        result += StringPrintf("%02X", c);
+        result += StringPrintf("%02X", static_cast<uint8_t>(c));
       }
     }
   }
@@ -1498,7 +1498,6 @@ void CWriter::Write(const Func& func) {
 
   Write("static ", ResultType(func.decl.sig.result_types), " ",
         GlobalName(func.name), "(");
-  // TODO(binji): Add stack check?
   WriteParams();
   WriteLocals();
   Write("FUNC_PROLOGUE;", Newline());

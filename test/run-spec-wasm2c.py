@@ -85,7 +85,8 @@ def F64ToC(f64_bits):
 def MangleName(s):
   result = 'Z_'
   for c in s:
-    if (c.isalnum() and c != 'Z') or c == '_':
+    # NOTE(binji): Z is not allowed.
+    if c in '_abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXY0123456789':
       result += c
     else:
       result += 'Z%02X' % ord(c)
@@ -175,10 +176,6 @@ class CWriter(object):
     command_funcs = {
         'module': self._WriteModuleCommand,
         'action': self._WriteActionCommand,
-        # 'assert_malformed': None,
-        # 'assert_invalid': None,
-        # 'assert_unlinkable': None,
-        # 'assert_uninstantiable': None,
         'assert_return': self._WriteAssertReturnCommand,
         'assert_return_canonical_nan': self._WriteAssertReturnNanCommand,
         'assert_return_arithmetic_nan': self._WriteAssertReturnNanCommand,
@@ -279,7 +276,6 @@ class CWriter(object):
 #
 # * imports       -- need overloaded spectest.print
 # * linking       -- need re-export of imported function
-# * names         -- weird names??
 
 
 def main(args):
@@ -369,5 +365,9 @@ if __name__ == '__main__':
   try:
     sys.exit(main(sys.argv[1:]))
   except Error as e:
-    sys.stderr.write(u'%s\n' % e)
+    # TODO(binji): gcc will output unicode quotes in errors since the terminal
+    # environment allows it, but python2 stderr will always attempt to convert
+    # to ascii first, which fails. This will replace the invalid characters
+    # instead, which is ugly, but works.
+    sys.stderr.write(u'{0}\n'.format(e).encode('ascii', 'replace'))
     sys.exit(1)
