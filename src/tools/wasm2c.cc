@@ -109,8 +109,9 @@ int ProgramMain(int argc, char** argv) {
                           &options, &error_handler, &module);
     if (Succeeded(result)) {
       if (Succeeded(result)) {
+        ValidateOptions options(s_features);
         WastLexer* lexer = nullptr;
-        result = ValidateModule(lexer, &module, &error_handler);
+        result = ValidateModule(lexer, &module, &error_handler, &options);
         result |= GenerateNames(&module);
       }
 
