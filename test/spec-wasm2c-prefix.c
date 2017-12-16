@@ -273,6 +273,22 @@ void Z_spectestZ_printZ_vi(uint32_t i) {
   printf("spectest.print(%d)\n", i);
 }
 
+void Z_spectestZ_printZ_vf(float f) {
+  printf("spectest.print(%g)\n", f);
+}
+
+void Z_spectestZ_printZ_vif(uint32_t i, float f) {
+  printf("spectest.print(%d %g)\n", i, f);
+}
+
+void Z_spectestZ_printZ_vd(double d) {
+  printf("spectest.print(%g)\n", d);
+}
+
+void Z_spectestZ_printZ_vdd(double d1, double d2) {
+  printf("spectest.print(%g %g)\n", d1, d2);
+}
+
 static void init_spectest_module(void) {
   wasm_rt_allocate_memory(&Z_spectestZ_memory, 1, 2);
   wasm_rt_allocate_table(&Z_spectestZ_table, 10, 20);

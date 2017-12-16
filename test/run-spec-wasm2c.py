@@ -145,9 +145,12 @@ class CWriter(object):
           self.module_prefix_map[command['name']] = name
           name_idx = self.module_name_to_idx[command['name']]
         else:
-          name_idx = idx
+          name_idx = idx - 1
 
         self.module_prefix_map[name_idx] = name
+
+    print(self.module_name_to_idx)
+    print(self.module_prefix_map)
 
   def _MaybeWriteDummyModule(self):
     if len(self.GetModuleFilenames()) == 0:
