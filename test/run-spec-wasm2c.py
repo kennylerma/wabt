@@ -82,6 +82,16 @@ def F64ToC(f64_bits):
     return '%.17g' % ReinterpretF64(f64_bits)
 
 
+def MangleType(t):
+  return {'i32': 'i', 'i64': 'j', 'f32': 'f', 'f64': 'd'}[t]
+
+
+def MangleTypes(types):
+  if not types:
+    return 'v'
+  return ''.join(MangleType(t) for t in types)
+
+
 def MangleName(s):
   result = 'Z_'
   for c in s:
@@ -263,10 +273,22 @@ class CWriter(object):
   def _ConstantList(self, consts):
     return ', '.join(self._Constant(const) for const in consts)
 
+  def _ActionSig(self, action):
+    type_ = action['type']
+    result_types = [result['type'] for result in action.get('expected', [])]
+    arg_types = [arg['type'] for arg in action.get('args', [])]
+    if type_ == 'invoke':
+      return MangleTypes(result_types) + MangleTypes(arg_types)
+    elif type_ == 'get':
+      return MangleType(result_types[0])
+    else:
+      raise Error('Unexpected action type: %s' % type_)
+
   def _Action(self, action):
     type_ = action['type']
     mangled_module_name = self.GetModulePrefix(action.get('module'))
-    field = mangled_module_name + MangleName(action['field'])
+    field = (mangled_module_name + MangleName(action['field']) +
+             self._ActionSig(action))
     if type_ == 'invoke':
       return '%s(%s)' % (field, self._ConstantList(action.get('args', [])))
     elif type_ == 'get':

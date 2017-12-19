@@ -1153,14 +1153,14 @@ void CWriter::WriteImports() {
       case ExternalKind::Memory: {
         const Memory& memory = cast<MemoryImport>(import)->memory;
         WriteMemory(memory, DefineImportName(memory.name, import->module_name,
-                                             import->field_name));
+                                             MangleName(import->field_name)));
         break;
       }
 
       case ExternalKind::Table: {
         const Table& table = cast<TableImport>(import)->table;
         WriteTable(table, DefineImportName(table.name, import->module_name,
-                                           import->field_name));
+                                           MangleName(import->field_name)));
         break;
       }
 
