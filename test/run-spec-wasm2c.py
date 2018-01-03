@@ -159,8 +159,8 @@ class CWriter(object):
 
         self.module_prefix_map[name_idx] = name
 
-    print(self.module_name_to_idx)
-    print(self.module_prefix_map)
+    # print(self.module_name_to_idx)
+    # print(self.module_prefix_map)
 
   def _MaybeWriteDummyModule(self):
     if len(self.GetModuleFilenames()) == 0:
@@ -207,7 +207,7 @@ class CWriter(object):
     self.out_file.write('%sinit();\n' % self.GetModulePrefix())
 
   def _WriteActionCommand(self, command):
-    self.out_file.write('%s;\n' % self._Action(command['action']))
+    self.out_file.write('%s;\n' % self._Action(command))
 
   def _WriteAssertReturnCommand(self, command):
     expected = command['expected']
@@ -223,7 +223,7 @@ class CWriter(object):
       assert_macro = assert_map[type_]
       self.out_file.write('%s(%s, %s);\n' %
                           (assert_macro,
-                           self._Action(command['action']),
+                           self._Action(command),
                            self._ConstantList(expected)))
     elif len(expected) == 0:
       self._WriteAssertActionCommand(command)
@@ -242,8 +242,7 @@ class CWriter(object):
     type_ = expected[0]['type']
     assert_macro = assert_map[(command['type'], type_)]
 
-    self.out_file.write('%s(%s);\n' % (assert_macro,
-                                       self._Action(command['action'])))
+    self.out_file.write('%s(%s);\n' % (assert_macro, self._Action(command)))
 
   def _WriteAssertActionCommand(self, command):
     assert_map = {
@@ -253,8 +252,7 @@ class CWriter(object):
     }
 
     assert_macro = assert_map[command['type']]
-    self.out_file.write('%s(%s);\n' % (
-      assert_macro, self._Action(command['action'])))
+    self.out_file.write('%s(%s);\n' % (assert_macro, self._Action(command)))
 
   def _Constant(self, const):
     type_ = const['type']
@@ -273,9 +271,9 @@ class CWriter(object):
   def _ConstantList(self, consts):
     return ', '.join(self._Constant(const) for const in consts)
 
-  def _ActionSig(self, action):
+  def _ActionSig(self, action, expected):
     type_ = action['type']
-    result_types = [result['type'] for result in action.get('expected', [])]
+    result_types = [result['type'] for result in expected]
     arg_types = [arg['type'] for arg in action.get('args', [])]
     if type_ == 'invoke':
       return MangleTypes(result_types) + MangleTypes(arg_types)
@@ -284,11 +282,13 @@ class CWriter(object):
     else:
       raise Error('Unexpected action type: %s' % type_)
 
-  def _Action(self, action):
+  def _Action(self, command):
+    action = command['action']
+    expected = command['expected']
     type_ = action['type']
     mangled_module_name = self.GetModulePrefix(action.get('module'))
     field = (mangled_module_name + MangleName(action['field']) +
-             self._ActionSig(action))
+             MangleName(self._ActionSig(action, expected)))
     if type_ == 'invoke':
       return '%s(%s)' % (field, self._ConstantList(action.get('args', [])))
     elif type_ == 'get':
@@ -299,7 +299,6 @@ class CWriter(object):
 
 # NOTE: still broken
 #
-# * imports       -- need overloaded spectest.print
 # * linking       -- need re-export of imported function
 
 

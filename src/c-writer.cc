@@ -745,13 +745,13 @@ std::string CWriter::MangleFuncName(string_view name,
                                     const TypeVector& param_types,
                                     const TypeVector& result_types) {
   std::string sig = MangleTypes(result_types) + MangleTypes(param_types);
-  return MangleName(name) + sig;
+  return MangleName(name) + MangleName(sig);
 }
 
 // static
 std::string CWriter::MangleGlobalName(string_view name, Type type) {
   std::string sig(1, MangleType(type));
-  return MangleName(name) + sig;
+  return MangleName(name) + MangleName(sig);
 }
 
 // static
