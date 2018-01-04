@@ -146,6 +146,8 @@ TOOLS = {
         'FLAGS': [
                 '--bindir=%(bindir)s',
                 '--no-error-cmdline',
+                # TODO(binji): Add Windows compile support
+                '--no-compile' if IS_WINDOWS else '--compile',
                 '-o',
                 '%(out_dir)s',
         ],

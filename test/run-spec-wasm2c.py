@@ -308,6 +308,8 @@ def main(args):
   parser.add_argument('--cflags', metavar='FLAGS',
                       help='additional flags for C compiler.',
                       action='append', default=[])
+  parser.add_argument('--compile', help='compile the C code (default)',
+                      dest='compile', action='store_true')
   parser.add_argument('--no-compile', help='don\'t compile the C code',
                       dest='compile', action='store_false')
   parser.add_argument('--no-run', help='don\'t run the compiled executable',
