@@ -1126,6 +1126,8 @@ void CWriter::WriteImports() {
 
   // TODO(binji): Write imports ordered by type.
   for (const Import* import : module_->imports) {
+    Write("/* import: '", import->module_name, "' '", import->field_name,
+          "' */", Newline());
     Write("extern ");
     switch (import->kind()) {
       case ExternalKind::Func: {
@@ -1136,7 +1138,7 @@ void CWriter::WriteImports() {
                 func.name, import->module_name,
                 MangleFuncName(import->field_name, func.decl.sig.param_types,
                                func.decl.sig.result_types)));
-        Write(";", Newline());
+        Write(";");
         break;
       }
 
@@ -1146,7 +1148,7 @@ void CWriter::WriteImports() {
                     DefineImportName(
                         global.name, import->module_name,
                         MangleGlobalName(import->field_name, global.type)));
-        Write(";", Newline());
+        Write(";");
         break;
       }
 
@@ -1167,6 +1169,8 @@ void CWriter::WriteImports() {
       default:
         WABT_UNREACHABLE;
     }
+
+    Write(Newline());
   }
 }
 
@@ -1251,6 +1255,7 @@ void CWriter::WriteMemories() {
     if (!is_import) {
       Write("static ");
       WriteMemory(*memory, DefineGlobalScopeName(memory->name));
+      Write(Newline());
     }
     ++memory_index;
   }
@@ -1273,13 +1278,14 @@ void CWriter::WriteTables() {
     if (!is_import) {
       Write("static ");
       WriteTable(*table, DefineGlobalScopeName(table->name));
+      Write(Newline());
     }
     ++table_index;
   }
 }
 
 void CWriter::WriteTable(const Table& table, const std::string& name) {
-  Write("wasm_rt_table_t ", name, ";", Newline());
+  Write("wasm_rt_table_t ", name, ";");
 }
 
 void CWriter::WriteDataInitializers() {
@@ -1397,7 +1403,11 @@ void CWriter::WriteHeaderExports() {
   Write(Newline());
 
   for (const Export* export_ : module_->exports) {
+    Write("/* export: '", export_->name, "' */", Newline());
+
     if (module_->IsImport(*export_)) {
+      // It's not possible to re-export an imported symbol using the current
+      // mechanism.
       Write("// ");
     }
 
@@ -1408,7 +1418,7 @@ void CWriter::WriteHeaderExports() {
             func->decl,
             ExportName(MangleFuncName(export_->name, func->decl.sig.param_types,
                                       func->decl.sig.result_types)));
-        Write(";", Newline());
+        Write(";");
         break;
       }
 
@@ -1417,7 +1427,7 @@ void CWriter::WriteHeaderExports() {
         Write("extern ");
         WriteGlobal(*global,
                     ExportName(MangleGlobalName(export_->name, global->type)));
-        Write(";", Newline());
+        Write(";");
         break;
       }
 
@@ -1435,6 +1445,8 @@ void CWriter::WriteHeaderExports() {
 
       default: WABT_UNREACHABLE;
     }
+
+    Write(Newline());
   }
 }
 
@@ -1447,7 +1459,11 @@ void CWriter::WriteExports() {
   for (const Export* export_ : module_->exports) {
     std::string name;
 
+    Write("/* export: '", export_->name, "' */", Newline());
+
     if (module_->IsImport(*export_)) {
+      // It's not possible to re-export an imported symbol using the current
+      // mechanism.
       Write("// ");
     }
 

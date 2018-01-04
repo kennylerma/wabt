@@ -159,9 +159,6 @@ class CWriter(object):
 
         self.module_prefix_map[name_idx] = name
 
-    # print(self.module_name_to_idx)
-    # print(self.module_prefix_map)
-
   def _MaybeWriteDummyModule(self):
     if len(self.GetModuleFilenames()) == 0:
       # This test doesn't have any valid modules, so just use a dummy instead.
@@ -297,11 +294,6 @@ class CWriter(object):
       raise Error('Unexpected action type: %s' % type_)
 
 
-# NOTE: still broken
-#
-# * linking       -- need re-export of imported function
-
-
 def main(args):
   parser = argparse.ArgumentParser()
   parser.add_argument('-o', '--out-dir', metavar='PATH',
@@ -316,6 +308,10 @@ def main(args):
   parser.add_argument('--cflags', metavar='FLAGS',
                       help='additional flags for C compiler.',
                       action='append', default=[])
+  parser.add_argument('--no-compile', help='don\'t compile the C code',
+                      dest='compile', action='store_false')
+  parser.add_argument('--no-run', help='don\'t run the compiled executable',
+                      dest='run', action='store_false')
   parser.add_argument('-v', '--verbose', help='print more diagnotic messages.',
                       action='store_true')
   parser.add_argument('--no-error-cmdline',
@@ -339,6 +335,12 @@ def main(args):
         utils.ChangeExt(options.file, '.json'), out_dir)
     wast2json.RunWithArgs(options.file, '-o', json_file_path)
 
+    wasm2c = utils.Executable(
+        find_exe.GetWasm2CExecutable(options.bindir),
+        error_cmdline=options.error_cmdline)
+
+    cc = utils.Executable(options.cc, *options.cflags)
+
     with open(json_file_path) as json_file:
       spec_json = json.load(json_file)
 
@@ -355,32 +357,27 @@ def main(args):
     with open(main_filename, 'w') as out_main_file:
       out_main_file.write(output.getvalue())
 
-    # Convert .wasm -> .c
-    wasm2c = utils.Executable(
-        find_exe.GetWasm2CExecutable(options.bindir),
-        error_cmdline=options.error_cmdline)
-
-    # Compile all .c files to .o files
-    cc = utils.Executable(options.cc, *options.cflags)
     o_filenames = []
 
-    i = 0
-    for wasm_filename in cwriter.GetModuleFilenames():
+    for i, wasm_filename in enumerate(cwriter.GetModuleFilenames()):
       c_filename = utils.ChangeExt(wasm_filename, '.c')
-      o_filename = utils.ChangeExt(wasm_filename, '.o')
-      o_filenames.append(o_filename)
       wasm2c.RunWithArgs(wasm_filename, '-o', c_filename, cwd=out_dir)
-      cc.RunWithArgs('-c', '-o', o_filename,
-                     '-DWASM_RT_MODULE_PREFIX=%s' % cwriter.GetModulePrefix(i),
-                     c_filename, cwd=out_dir)
-      i += 1
+      if options.compile:
+        o_filename = utils.ChangeExt(wasm_filename, '.o')
+        o_filenames.append(o_filename)
+        cc.RunWithArgs(
+            '-c', '-o', o_filename,
+            '-DWASM_RT_MODULE_PREFIX=%s' % cwriter.GetModulePrefix(i),
+            c_filename, cwd=out_dir)
 
-    main_c = os.path.basename(main_filename)
-    main_exe = os.path.basename(utils.ChangeExt(json_file_path, ''))
-    cc.RunWithArgs('-o', main_exe, '-lm', main_c, *o_filenames, cwd=out_dir)
+    if options.compile:
+      main_c = os.path.basename(main_filename)
+      main_exe = os.path.basename(utils.ChangeExt(json_file_path, ''))
+      cc.RunWithArgs('-o', main_exe, '-lm', main_c, *o_filenames, cwd=out_dir)
 
-    utils.Executable(os.path.join(out_dir, main_exe),
-                     forward_stdout=True).RunWithArgs()
+    if options.compile and options.run:
+      utils.Executable(os.path.join(out_dir, main_exe),
+                       forward_stdout=True).RunWithArgs()
 
   return 0
 
